@@ -104,7 +104,7 @@ const maxCatCount = computed(() => Math.max(...catStats.value.map(c => c.questio
 const lastUpdatedLabel = computed(() => lastUpdated.value
   ? new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit' }).format(lastUpdated.value)
   : '尚未刷新')
-const lastUpdatedIso = computed(() => lastUpdated.value?.toISOString() || '')
+const lastUpdatedIso = computed(() => lastUpdated.value?.toISOString() || ''
 
 function statusType(s) { return { draft: 'info', published: 'success', closed: 'warning' }[s] || 'info' }
 function statusLabel(s) { return { draft: '草稿', published: '进行中', closed: '已关闭' }[s] || s }
