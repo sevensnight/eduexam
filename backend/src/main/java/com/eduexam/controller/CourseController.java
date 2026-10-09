@@ -13,6 +13,7 @@ import com.eduexam.security.LoginUser;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.*;
@@ -157,7 +158,7 @@ public class CourseController {
             throw AppException.forbidden("无权访问");
         Course c = courseMapper.selectById(courseId);
         if (c == null) throw AppException.notFound("课程不存在");
-        if ("teacher".equals(loginUser.getRole()) && c.getTeacherId() != null && !c.getTeacherId().equals(loginUser.getUserId()))
+        if ("teacher".equals(loginUser.getRole()) && !loginUser.getUserId().equals(c.getTeacherId()))
             throw AppException.forbidden("无权管理该课程");
         List<CourseEnrollment> enrollments = enrollmentMapper.selectList(
                 new LambdaQueryWrapper<CourseEnrollment>().eq(CourseEnrollment::getCourseId, courseId));
@@ -186,7 +187,7 @@ public class CourseController {
             throw AppException.forbidden("无权访问");
         Course c = courseMapper.selectById(courseId);
         if (c == null) throw AppException.notFound("课程不存在");
-        if ("teacher".equals(loginUser.getRole()) && c.getTeacherId() != null && !c.getTeacherId().equals(loginUser.getUserId()))
+        if ("teacher".equals(loginUser.getRole()) && !loginUser.getUserId().equals(c.getTeacherId()))
             throw AppException.forbidden("无权管理该课程");
         if (req.getName() != null) c.setName(req.getName());
         if (req.getDescription() != null) c.setDescription(req.getDescription());
@@ -203,6 +204,7 @@ public class CourseController {
     }
 
     @PutMapping("/{courseId}/enrollments")
+    @Transactional
     public Map<String, Object> replaceEnrollments(@PathVariable Long courseId,
                                                    @RequestBody CourseEnrollmentUpdateDTO req,
                                                    @AuthenticationPrincipal LoginUser loginUser) {
@@ -210,7 +212,7 @@ public class CourseController {
             throw AppException.forbidden("无权访问");
         Course c = courseMapper.selectById(courseId);
         if (c == null) throw AppException.notFound("课程不存在");
-        if ("teacher".equals(loginUser.getRole()) && c.getTeacherId() != null && !c.getTeacherId().equals(loginUser.getUserId()))
+        if ("teacher".equals(loginUser.getRole()) && !loginUser.getUserId().equals(c.getTeacherId()))
             throw AppException.forbidden("无权管理该课程");
         List<Long> studentIds = req.getStudentIds() != null ?
                 req.getStudentIds().stream().distinct().sorted().collect(Collectors.toList()) : List.of();
@@ -240,7 +242,7 @@ public class CourseController {
             throw AppException.forbidden("无权访问");
         Course c = courseMapper.selectById(courseId);
         if (c == null) throw AppException.notFound("课程不存在");
-        if ("teacher".equals(loginUser.getRole()) && c.getTeacherId() != null && !c.getTeacherId().equals(loginUser.getUserId()))
+        if ("teacher".equals(loginUser.getRole()) && !loginUser.getUserId().equals(c.getTeacherId()))
             throw AppException.forbidden("无权管理该课程");
         enrollmentMapper.delete(new LambdaQueryWrapper<CourseEnrollment>().eq(CourseEnrollment::getCourseId, courseId));
         courseMapper.deleteById(courseId);
