@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.eduexam.mapper.QuestionMapper">
+
+    <select id="selectQuestionPage" resultType="com.eduexam.domain.Question">
+        SELECT DISTINCT q.*
+        FROM questions q
+        <if test="q.keyword != null and q.keyword != ''">
+            LEFT JOIN categories c ON c.id = q.category_id
+        </if>
+        <if test="q.keyword != null and q.keyword != '' or q.tagId != null">
+            LEFT JOIN question_tags qt ON qt.question_id = q.id
+            LEFT JOIN tags t ON t.id = qt.tag_id
+        </if>
+        <where>
+            <if test="q.ownerId != null">
+                AND q.creator_id = #{q.ownerId}
+            </if>
+            <if test="q.categoryId != null">
+                AND q.category_id = #{q.categoryId}
+            </if>
+            <if test="q.difficulty != null and q.difficulty != ''">
+                AND q.difficulty = #{q.difficulty}
+            </if>
+            <if test="q.questionType != null and q.questionType != ''">
+                AND q.question_type = #{q.questionType}
+            </if>
+            <if test="q.tagId != null">
+                AND t.id = #{q.tagId}
+            </if>
+            <if test="q.keyword != null and q.keyword != ''">
+                AND (
+                    q.title LIKE CONCAT('%', #{q.keyword}, '%')
+                    OR q.answer LIKE CONCAT('%', #{q.keyword}, '%')
+                    OR q.explanation LIKE CONCAT('%', #{q.keyword}, '%')
+                    OR c.name LIKE CONCAT('%', #{q.keyword}, '%')
+                    OR t.name LIKE CONCAT('%', #{q.keyword}, '%')
+                )
+            </if>
+        </where>
+        ORDER BY
+        <choose>
+            <when test="q.sortBy == 'usage_count'">q.usage_count</when>
+            <when test="q.sortBy == 'title'">q.title</when>
+            <when test="q.sortBy == 'difficulty'">
+                CASE q.difficulty WHEN 'easy' THEN 1 WHEN 'medium' THEN 2 WHEN 'hard' THEN 3 ELSE 99 END
+            </when>
+            <when test="q.sortBy == 'updated_at'">COALESCE(q.updated_at, q.created_at)</when>
+            <otherwise>q.created_at</otherwise>
+        </choose>
+        <choose>
+            <when test="q.sortOrder == 'asc'">ASC</when>
+            <otherwise>DESC</otherwise>
+        </choose>
+        , q.id DESC
+    </select>
+
+    <update id="incrementUsageCount">
+        UPDATE questions SET usage_count = usage_count + 1 WHERE id = #{id}
+    </update>
+
+</mapper>

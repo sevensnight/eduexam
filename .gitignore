@@ -1,0 +1,31 @@
+# Java / Maven
+backend/target/
+backend/META-INF/
+*.class
+
+# Node / Vite
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
+
+# Browser test artifacts
+frontend/artifacts/
+
+# IDE and OS files
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+
+# Logs and local exports
+*.log
+eduexam_backup*.sql
+
+# Local environment overrides
+.env
+.env.*
+!.env.example
