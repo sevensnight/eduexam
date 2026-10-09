@@ -55,3 +55,7 @@ npm run build
 ```
 
 项目的浏览器检查脚本位于 `frontend/scripts/visual_check.py`，测试截图默认写入被 Git 忽略的 `frontend/artifacts/` 目录。
+
+## Git 协作记录
+
+本项目的克隆、功能提交、回滚和远程同步过程记录在 [GIT_WORKFLOW.md](GIT_WORKFLOW.md) 中。
