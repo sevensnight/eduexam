@@ -61,3 +61,5 @@ npm run build
 ## Git 协作记录
 
 本项目的克隆、功能提交、回滚和远程同步过程记录在 [GIT_WORKFLOW.md](GIT_WORKFLOW.md) 中。
+
+完整的实践命令、提交哈希和验收结果见 [GIT_PRACTICE_REPORT.md](GIT_PRACTICE_REPORT.md)。
