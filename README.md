@@ -28,6 +28,8 @@ $env:EDUEXAM_DB_PASSWORD = '你的密码'
 
 也可以分别运行 `start_backend.bat` 和 `start_frontend.bat`。
 
+如果后端不在本机的 8080 端口运行，可以复制 `frontend/.env.example` 为 `frontend/.env.local`，再修改 `VITE_API_PROXY_TARGET`。`.env.local` 被 Git 忽略，不会进入提交。
+
 ## 演示账号
 
 | 角色 | 用户名 | 密码 |
