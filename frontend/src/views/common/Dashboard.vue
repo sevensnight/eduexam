@@ -6,7 +6,17 @@
         <h1>{{ displayName }}，欢迎回来。</h1>
         <p class="welcome-description">{{ store.isStudent ? '每一次练习，都在靠近更好的自己。' : '一眼掌握教学进展，开启今天的工作。' }}</p>
       </div>
-      <el-button type="primary" :icon="store.canManage ? 'Plus' : 'Notebook'" @click="$router.push(store.canManage ? '/exams/create' : '/exams')">{{ store.canManage ? '创建考试' : '查看考试' }}</el-button>
+      <div class="welcome-actions">
+        <div class="refresh-meta" aria-live="polite">
+          <span>数据更新于</span>
+          <time v-if="lastUpdated" :datetime="lastUpdatedIso">{{ lastUpdatedLabel }}</time>
+          <span v-else>尚未刷新</span>
+        </div>
+        <div class="welcome-buttons">
+          <el-button text :icon="Refresh" :loading="loading" @click="loadDashboard">刷新数据</el-button>
+          <el-button type="primary" :icon="store.canManage ? 'Plus' : 'Notebook'" @click="$router.push(store.canManage ? '/exams/create' : '/exams')">{{ store.canManage ? '创建考试' : '查看考试' }}</el-button>
+        </div>
+      </div>
     </section>
     <el-alert v-if="loadError" type="error" :closable="false" show-icon title="暂时无法加载概览">
       <template #default>请检查网络或后端服务。<el-button link type="primary" @click="loadDashboard">重新加载</el-button></template>
@@ -55,6 +65,7 @@
 
 <script setup>
 import { ref, onMounted, computed } from 'vue'
+import { Refresh } from '@element-plus/icons-vue'
 import { examApi, statsApi, tagApi, studentApi } from '@/api'
 import { useUserStore } from '@/stores/user'
 
@@ -70,6 +81,7 @@ const totalQuestions = ref(0)
 const totalTags = ref(0)
 const wrongCount = ref(0)
 const myRecordCount = ref(0)
+const lastUpdated = ref(null)
 
 const cards = computed(() => {
   if (store.isStudent) {
@@ -89,6 +101,10 @@ const cards = computed(() => {
 })
 
 const maxCatCount = computed(() => Math.max(...catStats.value.map(c => c.question_count), 1))
+const lastUpdatedLabel = computed(() => lastUpdated.value
+  ? new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit' }).format(lastUpdated.value)
+  : '尚未刷新')
+const lastUpdatedIso = computed(() => lastUpdated.value?.toISOString() || '')
 
 function statusType(s) { return { draft: 'info', published: 'success', closed: 'warning' }[s] || 'info' }
 function statusLabel(s) { return { draft: '草稿', published: '进行中', closed: '已关闭' }[s] || s }
@@ -120,6 +136,7 @@ async function loadDashboard() {
     totalQuestions.value = statsRes.reduce((sum, item) => sum + (item.question_count || 0), 0)
     totalTags.value = tagsRes.length
   }
+  lastUpdated.value = new Date()
   } catch { loadError.value = true }
   finally { loading.value = false }
 }
@@ -129,6 +146,10 @@ onMounted(loadDashboard)
 <style scoped>
 .dashboard-view { display: flex; flex-direction: column; gap: 28px; }
 .dashboard-welcome { display: flex; justify-content: space-between; align-items: center; gap: 24px; padding: 0 0 8px; }
+.welcome-actions { display: flex; align-items: flex-end; gap: 16px; }
+.welcome-buttons { display: flex; align-items: center; gap: 8px; }
+.refresh-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; color: var(--app-text-secondary); font-size: 11px; white-space: nowrap; }
+.refresh-meta time { color: var(--app-text); font-variant-numeric: tabular-nums; }
 .welcome-date { font-size: 12px; color: var(--app-text-secondary); margin: 0 0 12px; }
 .dashboard-welcome h1 { margin: 0 0 10px; }
 .welcome-description { color: var(--app-text-secondary); font-size: 14px; margin: 0; }
@@ -162,6 +183,9 @@ onMounted(loadDashboard)
 @media (max-width: 767px) {
   .dashboard-view { gap: 24px; }
   .dashboard-welcome { align-items: flex-start; flex-direction: column; gap: 18px; }
+  .welcome-actions { width: 100%; align-items: flex-start; flex-direction: column; gap: 10px; }
+  .refresh-meta { align-items: flex-start; }
+  .welcome-buttons { width: 100%; }
   .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 0; }
   .metric { padding: 20px; border-bottom: 1px solid var(--app-border); }
   .metric:nth-child(2) { border-right: 0; }
