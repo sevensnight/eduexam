@@ -8,11 +8,13 @@ import com.eduexam.dto.*;
 import com.eduexam.mapper.*;
 import com.eduexam.security.LoginUser;
 import com.eduexam.service.ExcelService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -34,6 +36,7 @@ public class ExamController {
     private final QuestionTagMapper questionTagMapper;
     private final UserMapper userMapper;
     private final CourseMapper courseMapper;
+    private final CourseEnrollmentMapper enrollmentMapper;
     private final NotificationMapper notificationMapper;
     private final WrongBookEntryMapper wrongBookMapper;
     private final ExcelService excelService;
@@ -110,6 +113,18 @@ public class ExamController {
         return false;
     }
 
+    private boolean canStudentAccessExam(Exam exam, Long studentId) {
+        User student = userMapper.selectById(studentId);
+        if (student == null || !Boolean.TRUE.equals(student.getIsActive())) return false;
+        if (exam.getTargetClass() != null && !exam.getTargetClass().isBlank()
+                && !exam.getTargetClass().equals(student.getClassName())) return false;
+        if (exam.getCourseId() != null && enrollmentMapper.selectCount(
+                new LambdaQueryWrapper<CourseEnrollment>()
+                        .eq(CourseEnrollment::getCourseId, exam.getCourseId())
+                        .eq(CourseEnrollment::getStudentId, studentId)) == 0) return false;
+        return true;
+    }
+
     private void persistExamQuestions(Long examId, List<ExamQuestionItemDTO> items) {
         examQuestionMapper.delete(new LambdaQueryWrapper<ExamQuestion>().eq(ExamQuestion::getExamId, examId));
         if (items == null) return;
@@ -147,10 +162,21 @@ public class ExamController {
         else if ("student".equals(loginUser.getRole())) {
             String studentClass = userMapper.selectById(loginUser.getUserId()).getClassName();
             // published exams targeting student's class (or all classes)
-            List<Exam> published = examMapper.selectList(new LambdaQueryWrapper<Exam>()
+            List<Long> enrolledCourseIds = enrollmentMapper.selectList(
+                            new LambdaQueryWrapper<CourseEnrollment>().eq(CourseEnrollment::getStudentId, loginUser.getUserId()))
+                    .stream().map(CourseEnrollment::getCourseId).toList();
+            LambdaQueryWrapper<Exam> publishedWrapper = new LambdaQueryWrapper<Exam>()
                     .eq(Exam::getStatus, "published")
-                    .and(w -> w.isNull(Exam::getTargetClass).or().eq(studentClass != null, Exam::getTargetClass, studentClass))
-                    .orderByDesc(Exam::getCreatedAt));
+                    .and(w -> {
+                        w.isNull(Exam::getTargetClass);
+                        if (studentClass != null && !studentClass.isBlank()) w.or().eq(Exam::getTargetClass, studentClass);
+                    })
+                    .and(w -> {
+                        w.isNull(Exam::getCourseId);
+                        if (!enrolledCourseIds.isEmpty()) w.or().in(Exam::getCourseId, enrolledCourseIds);
+                    })
+                    .orderByDesc(Exam::getCreatedAt);
+            List<Exam> published = examMapper.selectList(publishedWrapper);
             // closed exams the student has a record for
             List<Long> participatedIds = examRecordMapper.selectList(
                     new LambdaQueryWrapper<ExamRecord>().eq(ExamRecord::getStudentId, loginUser.getUserId()))
@@ -172,6 +198,7 @@ public class ExamController {
     }
 
     @PostMapping
+    @Transactional
     public Map<String, Object> createExam(@RequestBody ExamCreateDTO dto,
                                            @AuthenticationPrincipal LoginUser loginUser) {
         if ("student".equals(loginUser.getRole())) throw AppException.forbidden("无权操作");
@@ -194,21 +221,26 @@ public class ExamController {
         if ("student".equals(loginUser.getRole())) {
             if (!List.of("published", "closed").contains(exam.getStatus()))
                 throw AppException.notFound("考试不存在");
+            if (!canStudentAccessExam(exam, loginUser.getUserId()))
+                throw AppException.notFound("考试不存在");
+            if ("closed".equals(exam.getStatus()) && examRecordMapper.selectCount(
+                    new LambdaQueryWrapper<ExamRecord>()
+                            .eq(ExamRecord::getExamId, examId)
+                            .eq(ExamRecord::getStudentId, loginUser.getUserId())) == 0)
+                throw AppException.notFound("考试不存在");
         } else if (!canAccessExam(exam, loginUser)) throw AppException.forbidden("无权访问");
         List<ExamQuestion> eqs = examQuestionMapper.selectList(
                 new LambdaQueryWrapper<ExamQuestion>().eq(ExamQuestion::getExamId, examId)
                         .orderByAsc(ExamQuestion::getOrderNum));
         Map<String, Object> result = examToMap(exam, eqs, true);
         if ("student".equals(loginUser.getRole())) {
-            // Hide answers for ongoing exams
-            if ("published".equals(exam.getStatus())) {
-                List<?> questions = (List<?>) result.get("questions");
-                if (questions != null) {
-                    for (Object q : questions) {
-                        if (q instanceof Map<?, ?> qm) {
-                            ((Map<String, Object>) qm).remove("answer");
-                            ((Map<String, Object>) qm).remove("explanation");
-                        }
+            // Never expose the answer key through the exam-taking endpoint.
+            List<?> questions = (List<?>) result.get("questions");
+            if (questions != null) {
+                for (Object q : questions) {
+                    if (q instanceof Map<?, ?> qm) {
+                        ((Map<String, Object>) qm).remove("answer");
+                        ((Map<String, Object>) qm).remove("explanation");
                     }
                 }
             }
@@ -217,6 +249,7 @@ public class ExamController {
     }
 
     @PutMapping("/{examId}")
+    @Transactional
     public Map<String, Object> updateExam(@PathVariable Long examId, @RequestBody ExamUpdateDTO dto,
                                            @AuthenticationPrincipal LoginUser loginUser) {
         if ("student".equals(loginUser.getRole())) throw AppException.forbidden("无权操作");
@@ -257,6 +290,7 @@ public class ExamController {
     }
 
     @DeleteMapping("/{examId}")
+    @Transactional
     public Map<String, Boolean> deleteExam(@PathVariable Long examId,
                                             @AuthenticationPrincipal LoginUser loginUser) {
         if ("student".equals(loginUser.getRole())) throw AppException.forbidden("无权操作");
@@ -276,20 +310,21 @@ public class ExamController {
     // ======================== Student Exam Flow ========================
 
     @PostMapping("/{examId}/start")
+    @Transactional
     public Map<String, Object> startExam(@PathVariable Long examId,
                                           @AuthenticationPrincipal LoginUser loginUser) {
         if (!"student".equals(loginUser.getRole())) throw AppException.forbidden("仅学生可参加考试");
-        Exam exam = examMapper.selectById(examId);
+        // Serialize starts for the same exam so concurrent requests cannot create duplicate attempts.
+        Exam exam = examMapper.selectOne(new LambdaQueryWrapper<Exam>()
+                .eq(Exam::getId, examId).last("FOR UPDATE"));
         if (exam == null) throw AppException.notFound("考试不存在");
         if (!"published".equals(exam.getStatus())) throw AppException.badRequest("考试未开放");
         LocalDateTime now = LocalDateTime.now();
         if (exam.getOpenTime() != null && now.isBefore(exam.getOpenTime()))
             throw AppException.badRequest("考试尚未开始");
-        if (exam.getCloseTime() != null && now.isAfter(exam.getCloseTime()))
+        if (exam.getCloseTime() != null && !now.isBefore(exam.getCloseTime()))
             throw AppException.badRequest("考试已结束");
-        User student = userMapper.selectById(loginUser.getUserId());
-        if (exam.getTargetClass() != null && !exam.getTargetClass().isEmpty() &&
-                !exam.getTargetClass().equals(student.getClassName()))
+        if (!canStudentAccessExam(exam, loginUser.getUserId()))
             throw AppException.badRequest("您的班级不在此次考试范围内");
 
         List<ExamRecord> existing = examRecordMapper.selectList(
@@ -350,15 +385,26 @@ public class ExamController {
     }
 
     @PostMapping("/{examId}/submit")
-    public Map<String, Object> submitExam(@PathVariable Long examId, @RequestBody ExamSubmitDTO dto,
+    @Transactional
+    public Map<String, Object> submitExam(@PathVariable Long examId, @Valid @RequestBody ExamSubmitDTO dto,
                                            @AuthenticationPrincipal LoginUser loginUser) {
         if (!"student".equals(loginUser.getRole())) throw AppException.forbidden("仅学生可提交");
-        ExamRecord record = examRecordMapper.selectById(dto.getRecordId());
+        ExamRecord record = examRecordMapper.selectOne(new LambdaQueryWrapper<ExamRecord>()
+                .eq(ExamRecord::getId, dto.getRecordId()).last("FOR UPDATE"));
         if (record == null || !record.getExamId().equals(examId) || !record.getStudentId().equals(loginUser.getUserId()))
             throw AppException.notFound("考试记录不存在");
         if (!"in_progress".equals(record.getStatus())) throw AppException.badRequest("考试记录状态不正确");
 
         Exam exam = examMapper.selectById(examId);
+        if (exam == null || !canStudentAccessExam(exam, loginUser.getUserId()))
+            throw AppException.forbidden("无权提交该考试");
+        LocalDateTime now = LocalDateTime.now();
+        if (!"published".equals(exam.getStatus())) throw AppException.badRequest("考试已关闭");
+        if (exam.getCloseTime() != null && !now.isBefore(exam.getCloseTime()))
+            throw AppException.badRequest("考试已结束");
+        if (exam.getTimeLimit() != null && record.getStartedAt() != null
+                && !now.isBefore(record.getStartedAt().plusMinutes(exam.getTimeLimit())))
+            throw AppException.badRequest("考试时间已到，请重新进入考试查看结果");
         List<ExamQuestion> examQuestions = examQuestionMapper.selectList(
                 new LambdaQueryWrapper<ExamQuestion>().eq(ExamQuestion::getExamId, examId));
         Map<Long, ExamQuestion> qMap = examQuestions.stream().collect(Collectors.toMap(ExamQuestion::getQuestionId, eq -> eq));
@@ -491,7 +537,8 @@ public class ExamController {
                 am.put("question_title", q != null ? q.getTitle() : null);
                 am.put("question_type", q != null ? q.getQuestionType() : null);
                 am.put("user_answer", ans != null ? ans.getUserAnswer() : null);
-                am.put("correct_answer", q != null ? q.getAnswer() : null);
+                boolean showAnswer = !"student".equals(loginUser.getRole()) || "graded".equals(r.getStatus());
+                am.put("correct_answer", showAnswer && q != null ? q.getAnswer() : null);
                 am.put("is_correct", ans != null ? ans.getIsCorrect() : null);
                 am.put("score_got", ans != null ? ans.getScoreGot() : 0);
                 am.put("max_score", eq.getScore());
@@ -536,6 +583,7 @@ public class ExamController {
                 new LambdaQueryWrapper<Answer>().eq(Answer::getRecordId, record.getId()));
         Map<Long, Answer> answerByQid = rawAnswers.stream()
                 .collect(Collectors.toMap(Answer::getQuestionId, a -> a, (a, b) -> a));
+        boolean showAnswer = "graded".equals(record.getStatus());
         List<Map<String, Object>> answers = examQs.stream().map(eq -> {
             Question q = questionMap.get(eq.getQuestionId());
             Answer ans = answerByQid.get(eq.getQuestionId());
@@ -545,7 +593,7 @@ public class ExamController {
             am.put("question_title", q != null ? q.getTitle() : null);
             am.put("question_type", q != null ? q.getQuestionType() : null);
             am.put("user_answer", ans != null ? ans.getUserAnswer() : null);
-            am.put("correct_answer", q != null ? q.getAnswer() : null);
+            am.put("correct_answer", showAnswer && q != null ? q.getAnswer() : null);
             am.put("is_correct", ans != null ? ans.getIsCorrect() : null);
             am.put("score_got", ans != null ? ans.getScoreGot() : 0);
             am.put("max_score", eq.getScore());
@@ -574,9 +622,7 @@ public class ExamController {
         Map<Long, ExamQuestion> eqMap = examQs.stream().collect(Collectors.toMap(ExamQuestion::getQuestionId, eq -> eq));
         Map<Long, Answer> answerMap = answers.stream().collect(Collectors.toMap(Answer::getQuestionId, a -> a));
 
-        boolean showAnswer = !"student".equals(loginUser.getRole()) ||
-                "graded".equals(record.getStatus()) ||
-                "closed".equals(exam.getStatus());
+        boolean showAnswer = !"student".equals(loginUser.getRole()) || "graded".equals(record.getStatus());
 
         List<Map<String, Object>> qDetails = examQs.stream().map(eq -> {
             Question q = questionMapper.selectById(eq.getQuestionId());
@@ -610,6 +656,7 @@ public class ExamController {
     }
 
     @PutMapping("/{examId}/records/{recordId}/grade")
+    @Transactional
     public Map<String, Object> gradeEssay(@PathVariable Long examId, @PathVariable Long recordId,
                                            @RequestBody EssayGradeDTO dto,
                                            @AuthenticationPrincipal LoginUser loginUser) {
@@ -617,22 +664,18 @@ public class ExamController {
         Exam exam = examMapper.selectById(examId);
         if (exam == null) throw AppException.notFound("考试不存在");
         if (!canAccessExam(exam, loginUser)) throw AppException.forbidden("无权操作");
-        ExamRecord record = examRecordMapper.selectById(recordId);
+        ExamRecord record = examRecordMapper.selectOne(new LambdaQueryWrapper<ExamRecord>()
+                .eq(ExamRecord::getId, recordId).last("FOR UPDATE"));
         if (record == null || !record.getExamId().equals(examId)) throw AppException.notFound("考试记录不存在");
         if (!"submitted".equals(record.getStatus())) throw AppException.badRequest("该记录无需批改");
 
-        double addedScore = 0;
         for (EssayGradeDTO.EssayGradeItemDTO item : dto.getGrades()) {
             Answer ans = answerMapper.selectById(item.getAnswerId());
             if (ans == null || !ans.getRecordId().equals(recordId)) continue;
             ans.setIsCorrect(item.getIsCorrect()); ans.setScoreGot(item.getScoreGot());
             answerMapper.updateById(ans);
-            addedScore += item.getScoreGot();
         }
-        double objScore = answerMapper.selectList(new LambdaQueryWrapper<Answer>().eq(Answer::getRecordId, recordId))
-                .stream().filter(a -> !"P".equals(a.getIsCorrect())).mapToDouble(Answer::getScoreGot).sum();
-        record.setTotalScore(objScore + addedScore - dto.getGrades().stream().mapToDouble(EssayGradeDTO.EssayGradeItemDTO::getScoreGot).sum() + addedScore);
-        // Recalculate properly
+        // Recalculate from persisted answer rows so repeated grading cannot double-count points.
         double totalScoreCalc = answerMapper.selectList(new LambdaQueryWrapper<Answer>().eq(Answer::getRecordId, recordId))
                 .stream().mapToDouble(a -> a.getScoreGot() != null ? a.getScoreGot() : 0).sum();
         record.setTotalScore(totalScoreCalc);

@@ -26,6 +26,18 @@ public class StatsController {
     private final UserMapper userMapper;
     private final QuestionTagMapper questionTagMapper;
     private final TagMapper tagMapper;
+    private final CourseEnrollmentMapper enrollmentMapper;
+
+    private boolean canStudentAccessExam(Exam exam, Long studentId) {
+        User student = userMapper.selectById(studentId);
+        if (student == null || !Boolean.TRUE.equals(student.getIsActive())) return false;
+        if (exam.getTargetClass() != null && !exam.getTargetClass().isBlank()
+                && !exam.getTargetClass().equals(student.getClassName())) return false;
+        return exam.getCourseId() == null || enrollmentMapper.selectCount(
+                new LambdaQueryWrapper<CourseEnrollment>()
+                        .eq(CourseEnrollment::getCourseId, exam.getCourseId())
+                        .eq(CourseEnrollment::getStudentId, studentId)) > 0;
+    }
 
     @GetMapping("/categories")
     public List<Map<String, Object>> categoryStats(@AuthenticationPrincipal LoginUser loginUser) {
@@ -76,8 +88,12 @@ public class StatsController {
                                             @AuthenticationPrincipal LoginUser loginUser) {
         Exam exam = examMapper.selectById(examId);
         if (exam == null) throw AppException.notFound("考试不存在");
-        if ("student".equals(loginUser.getRole()) && !Boolean.TRUE.equals(exam.getScorePublic()))
-            throw AppException.forbidden("成绩统计未公开");
+        if ("student".equals(loginUser.getRole())) {
+            if (!Boolean.TRUE.equals(exam.getScorePublic()) || !canStudentAccessExam(exam, loginUser.getUserId()))
+                throw AppException.forbidden("无权查看该考试统计");
+            if (!List.of("published", "closed").contains(exam.getStatus()))
+                throw AppException.forbidden("考试统计尚未开放");
+        }
         if ("teacher".equals(loginUser.getRole()) && !loginUser.getUserId().equals(exam.getTeacherId()))
             throw AppException.forbidden("无权访问");
 
@@ -122,6 +138,12 @@ public class StatsController {
                                                        @AuthenticationPrincipal LoginUser loginUser) {
         Exam exam = examMapper.selectById(examId);
         if (exam == null) throw AppException.notFound("考试不存在");
+        if ("student".equals(loginUser.getRole())) {
+            if (!Boolean.TRUE.equals(exam.getScorePublic()) || !canStudentAccessExam(exam, loginUser.getUserId()))
+                throw AppException.forbidden("无权查看该考试统计");
+            if (!List.of("published", "closed").contains(exam.getStatus()))
+                throw AppException.forbidden("考试统计尚未开放");
+        }
         if ("teacher".equals(loginUser.getRole()) && !loginUser.getUserId().equals(exam.getTeacherId()))
             throw AppException.forbidden("无权访问");
 
