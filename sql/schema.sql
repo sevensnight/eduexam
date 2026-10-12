@@ -143,6 +143,7 @@ CREATE TABLE IF NOT EXISTS answers (
     user_answer TEXT        NULL,
     is_correct  VARCHAR(1)  NULL COMMENT 'Y/N/P',
     score_got   DOUBLE      NOT NULL DEFAULT 0,
+    UNIQUE KEY uq_answer_record_question (record_id, question_id),
     INDEX idx_answers_record (record_id),
     INDEX idx_answers_question (question_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -166,3 +167,7 @@ CREATE TABLE IF NOT EXISTS notifications (
     INDEX idx_notif_user (user_id),
     INDEX idx_notif_read (is_read)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Normalize statuses written by older demo-data versions.
+UPDATE exam_records SET status = 'graded' WHERE status = 'completed';
+UPDATE exam_records SET status = 'in_progress' WHERE status = 'started';
