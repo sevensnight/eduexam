@@ -6,7 +6,9 @@ import com.eduexam.domain.*;
 import com.eduexam.mapper.*;
 import com.eduexam.security.LoginUser;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
@@ -57,7 +59,10 @@ public class StudentController {
             m.put("result_released", released);
             m.put("attempt_count", r.getAttemptCount()); m.put("essay_graded", r.getEssayGraded());
             // passed: null only when not yet fully graded
-            Double actualScore = r.getTotalScore(); Double ps = e != null ? e.getPassScore() : null;
+            Double actualScore = r.getTotalScore();
+            Double ps = e != null ? e.getPassScore() : null;
+            if (ps == null && e != null && e.getTotalScore() != null)
+                ps = e.getTotalScore() * 0.6;
             m.put("passed", isGraded && actualScore != null && ps != null ? actualScore >= ps : null);
             return m;
         }).collect(Collectors.toList());
@@ -219,9 +224,16 @@ public class StudentController {
     }
 
     @PostMapping("/wrong-book/{questionId}")
+    @Transactional
     public Map<String, Boolean> addToWrongBook(@PathVariable Long questionId,
                                                 @AuthenticationPrincipal LoginUser loginUser) {
         if (!"student".equals(loginUser.getRole())) throw AppException.forbidden("仅学生可访问");
+        User currentUser = userMapper.selectOne(new LambdaQueryWrapper<User>()
+                .eq(User::getId, loginUser.getUserId()).last("FOR SHARE"));
+        if (currentUser == null || !Boolean.TRUE.equals(currentUser.getIsActive())
+                || !"student".equals(currentUser.getRole())) {
+            throw AppException.forbidden("当前账号已停用或不再是学生");
+        }
         if (questionMapper.selectById(questionId) == null) throw AppException.notFound("题目不存在");
         if (!hasIncorrectAnswer(loginUser.getUserId(), questionId))
             throw AppException.badRequest("只能收藏自己答错过的题目");
@@ -231,7 +243,11 @@ public class StudentController {
         if (exists == 0) {
             WrongBookEntry wb = new WrongBookEntry();
             wb.setStudentId(loginUser.getUserId()); wb.setQuestionId(questionId);
-            wrongBookMapper.insert(wb);
+            try {
+                wrongBookMapper.insert(wb);
+            } catch (DuplicateKeyException ignored) {
+                // A repeated click or concurrent request is idempotent.
+            }
         }
         return Map.of("ok", true);
     }

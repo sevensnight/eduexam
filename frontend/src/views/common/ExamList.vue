@@ -3,11 +3,14 @@
     <el-card>
       <template #header>
         <div class="card-header">
-          <span>全部考试 <span class="list-count">{{ exams.length }}</span></span>
+          <span>全部考试 <span class="list-count">{{ total }}</span></span>
           <el-button v-if="store.canManage" type="primary" @click="$router.push('/exams/create')" :icon="Plus">创建考试</el-button>
         </div>
       </template>
-      <el-table :data="exams" v-loading="loading">
+      <el-alert v-if="loadError" type="error" :closable="false" show-icon title="考试列表加载失败" style="margin-bottom:16px">
+        <template #default>请检查网络或后端服务。<el-button link type="primary" @click="load">重新加载</el-button></template>
+      </el-alert>
+      <el-table :data="exams" v-loading="loading" empty-text="暂无考试">
         <el-table-column prop="title" label="考试名称" min-width="200" />
         <el-table-column label="状态" width="100">
           <template #default="{ row }">
@@ -50,7 +53,14 @@
               <el-tooltip :content="row.has_essay ? '' : '该试卷没有需要批改的主观题'" placement="top" :disabled="row.has_essay">
                 <el-button link type="warning" :disabled="!row.has_essay" @click="$router.push(`/exams/${row.id}/grade`)">批改</el-button>
               </el-tooltip>
-              <el-button link :type="row.status === 'published' ? 'warning' : 'success'" @click="toggleStatus(row)">{{ row.status === 'published' ? '关闭' : '发布' }}</el-button>
+              <el-button
+                v-if="row.status !== 'closed'"
+                link
+                :type="row.status === 'published' ? 'warning' : 'success'"
+                :loading="statusUpdating.has(row.id)"
+                :disabled="statusUpdating.has(row.id)"
+                @click="toggleStatus(row)"
+              >{{ row.status === 'published' ? '关闭' : '发布' }}</el-button>
               <el-popconfirm title="确认删除该考试？" @confirm="removeExam(row.id)">
                 <template #reference><el-button link type="danger">删除</el-button></template>
               </el-popconfirm>
@@ -71,6 +81,15 @@
           </template>
         </el-table-column>
       </el-table>
+      <el-pagination
+        v-if="total > pageSize"
+        v-model:current-page="page"
+        :page-size="pageSize"
+        :total="total"
+        layout="prev, pager, next, total"
+        style="margin-top:20px;justify-content:flex-end"
+        @current-change="handlePageChange"
+      />
     </el-card>
   </div>
 </template>
@@ -82,24 +101,29 @@ import { ElMessage, ElMessageBox, ElTooltip } from 'element-plus'
 import { examApi } from '@/api'
 import { useUserStore } from '@/stores/user'
 import { useRouter } from 'vue-router'
+import { formatAppDateTime, parseAppDateTimeMs } from '@/utils/examTime'
 
 const router = useRouter()
 const store = useUserStore()
 const loading = ref(false)
+const loadError = ref(false)
 const exams = ref([])
+const page = ref(1)
+const pageSize = 20
+const total = ref(0)
+let loadRequestId = 0
+const statusUpdating = ref(new Set())
 
 function statusType(s) { return { draft: 'info', published: 'success', closed: 'warning' }[s] || 'info' }
 function statusLabel(s) { return { draft: '草稿', published: '进行中', closed: '已关闭' }[s] || s }
 function formatDate(value) {
-  if (!value) return '不限'
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? '-' : date.toLocaleString()
+  return value ? formatAppDateTime(value) : '不限'
 }
 function studentStartReason(exam) {
   if (exam.status !== 'published') return '考试未开放'
   const now = Date.now()
-  const openAt = exam.open_time ? new Date(exam.open_time).getTime() : null
-  const closeAt = exam.close_time ? new Date(exam.close_time).getTime() : null
+  const openAt = exam.open_time ? parseAppDateTimeMs(exam.open_time) : null
+  const closeAt = exam.close_time ? parseAppDateTimeMs(exam.close_time) : null
   if (openAt && now < openAt) return '未到开放时间'
   if (closeAt && now >= closeAt) return '考试已过截止时间'
   return ''
@@ -107,24 +131,64 @@ function studentStartReason(exam) {
 
 async function toggleStatus(exam) {
   const newStatus = exam.status === 'published' ? 'closed' : 'published'
-  await examApi.update(exam.id, { status: newStatus })
-  exam.status = newStatus
-  ElMessage.success('状态已更新')
+  const closing = newStatus === 'closed'
+  try {
+    await ElMessageBox.confirm(
+      closing
+        ? `确认关闭“${exam.title}”？系统将停止新的作答，并结算仍在进行中的答卷。`
+        : `确认发布“${exam.title}”？发布后符合范围的学生即可参加考试。`,
+      closing ? '关闭考试' : '发布考试',
+      {
+        type: closing ? 'warning' : 'info',
+        confirmButtonText: closing ? '确认关闭' : '确认发布',
+        cancelButtonText: '取消',
+      },
+    )
+  } catch {
+    return
+  }
+  statusUpdating.value = new Set(statusUpdating.value).add(exam.id)
+  try {
+    await examApi.update(exam.id, { status: newStatus })
+    exam.status = newStatus
+    ElMessage.success(closing ? '考试已关闭' : '考试已发布')
+  } finally {
+    const next = new Set(statusUpdating.value)
+    next.delete(exam.id)
+    statusUpdating.value = next
+  }
 }
 
 async function removeExam(id) {
   await examApi.remove(id)
   ElMessage.success('删除成功')
-  load()
+  await load()
+  if (!exams.value.length && page.value > 1) {
+    page.value--
+    await load()
+  }
 }
 
 async function load() {
+  const requestId = ++loadRequestId
   loading.value = true
+  loadError.value = false
   try {
-    exams.value = await examApi.list()
+    const response = await examApi.list({ page: page.value, size: pageSize })
+    if (requestId === loadRequestId) {
+      exams.value = response.items || []
+      total.value = response.total || 0
+    }
+  } catch {
+    if (requestId === loadRequestId) loadError.value = true
   } finally {
-    loading.value = false
+    if (requestId === loadRequestId) loading.value = false
   }
+}
+
+function handlePageChange(nextPage) {
+  page.value = nextPage
+  load()
 }
 
 onMounted(load)

@@ -14,23 +14,34 @@
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { useUserStore } from '@/stores/user'
+import {
+  Collection,
+  Document,
+  FolderOpened,
+  List,
+  Notebook,
+  Odometer,
+  TrendCharts,
+  User,
+  WarningFilled,
+} from '@element-plus/icons-vue'
 defineEmits(['navigate'])
 const route = useRoute()
 const store = useUserStore()
 const items = computed(() => [
-  { path: '/dashboard', label: '控制台', icon: 'Odometer' },
+  { path: '/dashboard', label: '控制台', icon: Odometer },
   ...(store.canManage ? [
-    { path: '/questions', label: '题库管理', icon: 'Document' },
-    { path: '/categories', label: '分类管理', icon: 'FolderOpened' },
-    { path: '/courses', label: '课程管理', icon: 'Collection' },
+    { path: '/questions', label: '题库管理', icon: Document },
+    { path: '/categories', label: '分类管理', icon: FolderOpened },
+    { path: '/courses', label: '课程管理', icon: Collection },
   ] : []),
-  { path: '/exams', label: '考试列表', icon: 'Notebook' },
+  { path: '/exams', label: '考试列表', icon: Notebook },
   ...(store.isStudent ? [
-    { path: '/my-records', label: '我的成绩', icon: 'List' },
-    { path: '/wrong-book', label: '错题本', icon: 'WarningFilled' },
+    { path: '/my-records', label: '我的成绩', icon: List },
+    { path: '/wrong-book', label: '错题本', icon: WarningFilled },
   ] : []),
-  { path: '/stats', label: '统计分析', icon: 'TrendCharts' },
-  ...(store.isAdmin ? [{ path: '/admin/users', label: '用户管理', icon: 'User' }] : []),
+  { path: '/stats', label: '统计分析', icon: TrendCharts },
+  ...(store.isAdmin ? [{ path: '/admin/users', label: '用户管理', icon: User }] : []),
 ])
 const activePath = computed(() => items.value.find(item =>
   route.path === item.path || route.path.startsWith(item.path + '/'))?.path || '')

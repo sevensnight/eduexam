@@ -16,7 +16,7 @@
       </el-table>
     </el-card>
 
-    <el-card header="选择考试查看统计">
+    <el-card header="选择考试查看统计" v-loading="statLoading">
       <el-select
         v-model="selectedExam"
         placeholder="选择考试"
@@ -25,6 +25,16 @@
       >
         <el-option v-for="exam in exams" :key="exam.id" :label="exam.title" :value="exam.id" />
       </el-select>
+      <el-pagination
+        v-if="examTotal > examPageSize"
+        v-model:current-page="examPage"
+        :page-size="examPageSize"
+        :total="examTotal"
+        layout="prev, pager, next, total"
+        small
+        style="margin-bottom:16px"
+        @current-change="changeExamPage"
+      />
 
       <!-- Student: score not public notice -->
       <el-alert
@@ -36,6 +46,18 @@
         show-icon
         style="margin-bottom: 16px"
       />
+
+      <el-alert
+        v-if="selectedExam && statsError"
+        title="考试统计加载失败"
+        description="请检查网络或后端服务后重试。"
+        type="error"
+        :closable="false"
+        show-icon
+        style="margin-bottom: 16px"
+      >
+        <template #default><el-button link type="primary" @click="loadExamStat(selectedExam)">重新加载</el-button></template>
+      </el-alert>
 
       <template v-if="examStat">
         <el-row :gutter="16" style="margin-bottom: 20px">
@@ -116,16 +138,24 @@ import { computed, onMounted, ref } from 'vue'
 
 import { examApi, statsApi } from '@/api'
 import { useUserStore } from '@/stores/user'
+import { WarningFilled } from '@element-plus/icons-vue'
 
 const store = useUserStore()
 const loading = ref(true)
 const catStats = ref([])
 const exams = ref([])
+const examPage = ref(1)
+const examPageSize = 50
+const examTotal = ref(0)
 const selectedExam = ref(null)
 const examStat = ref(null)
 const insights = ref(null)
 const examCatDist = ref([])
 const scoreNotPublic = ref(false)
+const statsError = ref(false)
+const statLoading = ref(false)
+let statRequestId = 0
+let examPageRequestId = 0
 
 const maxCat = computed(() => Math.max(...catStats.value.map((item) => item.question_count), 1))
 const maxExamCat = computed(() => Math.max(...examCatDist.value.map((item) => item.question_count), 1))
@@ -141,33 +171,68 @@ const statCards = computed(() => [
 
 async function loadExamStat(examId) {
   if (!examId) return
+  const requestId = ++statRequestId
   scoreNotPublic.value = false
+  statsError.value = false
+  statLoading.value = true
   examStat.value = null
   examCatDist.value = []
   insights.value = null
 
+  let forbidden = false
+  let failed = false
   const [stat, catDist] = await Promise.all([
-    statsApi.exam(examId).catch((err) => {
-      if (err?.response?.status === 403) scoreNotPublic.value = true
+    statsApi.exam(examId, { suppressError: true }).catch((err) => {
+      if (err?.response?.status === 403) forbidden = true
+      else failed = true
       return null
     }),
     statsApi.examCategoryDist(examId).catch(() => []),
   ])
+  if (requestId !== statRequestId) return
+  scoreNotPublic.value = forbidden
+  statsError.value = failed
   examStat.value = stat
   examCatDist.value = catDist
   if (stat && store.canManage) {
-    insights.value = await statsApi.insights(examId).catch(() => null)
+    const insightResult = await statsApi.insights(examId).catch(() => null)
+    if (requestId !== statRequestId) return
+    insights.value = insightResult
   }
+  if (requestId === statRequestId) statLoading.value = false
+}
+
+async function loadExamPage() {
+  const requestId = ++examPageRequestId
+  const requestedPage = examPage.value
+  const response = await examApi.list({ page: requestedPage, size: examPageSize })
+    .catch(() => ({ items: [], total: 0 }))
+  if (requestId === examPageRequestId && requestedPage === examPage.value) {
+    exams.value = response.items || []
+    examTotal.value = response.total || 0
+  }
+}
+
+async function changeExamPage(nextPage) {
+  examPage.value = nextPage
+  ++statRequestId
+  selectedExam.value = null
+  examStat.value = null
+  insights.value = null
+  examCatDist.value = []
+  scoreNotPublic.value = false
+  statsError.value = false
+  statLoading.value = false
+  await loadExamPage()
 }
 
 onMounted(async () => {
   try {
-    const [categories, examList] = await Promise.all([
+    const [categories] = await Promise.all([
       store.isStudent ? Promise.resolve([]) : statsApi.categories().catch(() => []),
-      examApi.list().catch(() => []),
+      loadExamPage(),
     ])
     catStats.value = categories
-    exams.value = examList
   } finally {
     loading.value = false
   }

@@ -27,13 +27,13 @@
     <el-card header="修改密码">
       <el-form ref="pwdFormRef" :model="pwdForm" :rules="pwdRules" label-width="90px">
         <el-form-item label="原密码" prop="old_password">
-          <el-input v-model="pwdForm.old_password" type="password" show-password />
+          <el-input v-model="pwdForm.old_password" type="password" maxlength="72" show-password />
         </el-form-item>
         <el-form-item label="新密码" prop="new_password">
-          <el-input v-model="pwdForm.new_password" type="password" show-password />
+          <el-input v-model="pwdForm.new_password" type="password" maxlength="72" placeholder="8-72 位，至少包含一个字母和一个数字" show-password />
         </el-form-item>
         <el-form-item label="确认密码" prop="confirm">
-          <el-input v-model="pwdForm.confirm" type="password" show-password />
+          <el-input v-model="pwdForm.confirm" type="password" maxlength="72" show-password />
         </el-form-item>
         <el-form-item>
           <el-button type="primary" :loading="pwdLoading" @click="changePassword">修改密码</el-button>
@@ -79,9 +79,22 @@ async function saveProfile() {
 const pwdFormRef = ref()
 const pwdLoading = ref(false)
 const pwdForm = ref({ old_password: '', new_password: '', confirm: '' })
+function validatePasswordBytes(_, value, callback) {
+  if (value && new TextEncoder().encode(value).length > 72) callback(new Error('密码的 UTF-8 编码不能超过 72 字节'))
+  else callback()
+}
 const pwdRules = {
-  old_password: [{ required: true, message: '请输入原密码' }],
-  new_password: [{ required: true, message: '请输入新密码' }, { min: 6, message: '密码至少 6 位' }],
+  old_password: [
+    { required: true, message: '请输入原密码' },
+    { max: 72, message: '密码不能超过 72 位' },
+    { validator: validatePasswordBytes },
+  ],
+  new_password: [
+    { required: true, message: '请输入新密码' },
+    { min: 8, max: 72, message: '密码长度需为 8-72 位' },
+    { validator: validatePasswordBytes },
+    { pattern: /^(?=.*\p{L})(?=.*\d).+$/u, message: '密码至少包含一个字母和一个数字' },
+  ],
   confirm: [
     { required: true, message: '请确认新密码' },
     {
@@ -94,14 +107,16 @@ const pwdRules = {
 }
 
 async function changePassword() {
-  await pwdFormRef.value.validate()
+  const valid = await pwdFormRef.value.validate().catch(() => false)
+  if (!valid) return
   pwdLoading.value = true
   try {
-    await authApi.changePassword({
+    const result = await authApi.changePassword({
       old_password: pwdForm.value.old_password,
       new_password: pwdForm.value.new_password,
     })
-    ElMessage.success('密码修改成功')
+    store.setAuth(result.access_token, result.user)
+    ElMessage.success('密码修改成功，其他已登录会话已失效')
     pwdForm.value = { old_password: '', new_password: '', confirm: '' }
     pwdFormRef.value.resetFields()
   } finally {

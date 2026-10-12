@@ -5,12 +5,12 @@
 ## 技术栈
 
 - 前端：Vue 3、Vite、Element Plus、Pinia、Vue Router、ECharts
-- 后端：Java 17、Spring Boot 3.2、Spring Security、MyBatis-Plus、JWT
+- 后端：Java 17、Spring Boot 3.5.16、Spring Security、MyBatis-Plus、JWT
 - 数据库：MySQL 8.0+
 
 ## 本地启动
 
-环境要求：Java 17、Maven 3.9+、Node.js 20+、MySQL 8.0+。
+环境要求：Java 17、Maven 3.9+、Node.js 20.19+（或 22.12+）、MySQL 8.0+。
 
 1. 确认 MySQL 服务正在运行，并配置 `.eduexam.local.bat` 中的数据库用户名、密码和 JWT 密钥。
 2. 双击 `start_all.bat`。
@@ -18,9 +18,13 @@
 
 首次启动前，复制 `eduexam.local.example.bat` 为 `.eduexam.local.bat`，填入本机 MySQL 密码和一个随机 JWT 密钥。示例文件中的 `APP_JWT_SECRET=CHANGE_ME` 必须替换；可以用下面的 PowerShell 命令生成 32 字节随机密钥：`[Convert]::ToHexString([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))`。`.eduexam.local.bat` 已被 Git 忽略，不会上传到远程仓库；启动脚本会自动读取它。新注册账号默认为学生，班级由管理员在用户管理中分配，不能通过注册或个人资料自报班级。
 
-启动脚本会从项目内的 `sql/schema.sql` 检查数据库结构，并迁移旧的考试记录状态、清理历史重复答题后建立 `(record_id, question_id)` 唯一约束；默认不会自动导入演示账号，只有在本地配置中明确设置 `EDUEXAM_SEED_DEMO=true` 且数据库为空时才导入 `sql/data.sql`。网页操作保存到 MySQL，不会改写 SQL 初始化文件。
+启动脚本会从项目内的 `sql/schema.sql` 检查 13 张核心表；新库或结构不完整时执行幂等初始化，已有数据库则由后端启动时的 Flyway 版本迁移自动升级。迁移会清理旧状态、孤儿关联和历史重复答题，建立外键与 `(record_id, question_id)` 唯一约束，校准题目引用次数，并为旧库补齐防止多标签页覆盖的草稿版本列。默认不会自动导入演示账号，只有在本地配置中明确设置 `EDUEXAM_SEED_DEMO=true` 且数据库为空时才导入 `sql/data.sql`。网页操作保存到 MySQL，不会改写 SQL 初始化文件。
+
+密码采用 BCrypt 保存，长度为 8–72 个字符且 UTF-8 编码不超过 72 字节。若旧版本曾创建超过该上限的密码，请由管理员通过学生导入重设为符合规则的新密码。
 
 学生答题时，草稿会同时保存在浏览器会话和 MySQL 中；网络短暂中断或页面刷新后可恢复。到达考试截止时间时，后端以截止前最后一次成功保存的服务端草稿结算，不接受截止后的新答案。
+
+成绩批量导入应使用系统当前导出的模板。新版模板通过 `record_id` 精确定位某次考试记录，并包含每道题的得分列；旧的“只有学生编号和总分”模板不会再直接覆盖成绩，以避免重考场景下改错记录或造成总分与逐题得分不一致。
 
 如果不想使用本地配置文件，也可以在 PowerShell 中设置环境变量后再启动：
 
@@ -64,6 +68,7 @@ $env:EDUEXAM_SEED_DEMO = 'true' # 仅本地空库演示时需要
 ```powershell
 cd frontend
 npm install
+npm test
 npm run build
 ```
 

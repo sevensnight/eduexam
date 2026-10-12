@@ -14,6 +14,8 @@ public class LoginUser implements UserDetails {
     private final User user;
 
     public LoginUser(User user) {
+        if (user == null || !RolePolicy.isSupported(user.getRole()))
+            throw new IllegalArgumentException("Unsupported user role");
         this.user = user;
     }
 

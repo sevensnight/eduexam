@@ -18,7 +18,8 @@ public class User {
     private String realName;
     private String className;
     private Boolean isActive;
+    private Integer tokenVersion;
     @TableField(fill = FieldFill.INSERT)
-    @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ssXXX")
+    @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
     private LocalDateTime createdAt;
 }

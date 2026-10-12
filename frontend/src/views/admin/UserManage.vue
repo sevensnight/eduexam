@@ -29,7 +29,11 @@
       </div>
     </div>
 
-    <el-table :data="users" border stripe>
+    <el-alert v-if="loadError" type="error" :closable="false" show-icon title="用户列表加载失败" style="margin-bottom:16px">
+      <template #default>请检查网络或后端服务。<el-button link type="primary" @click="fetchUsers">重新加载</el-button></template>
+    </el-alert>
+
+    <el-table :data="users" border stripe empty-text="暂无用户">
       <el-table-column prop="id" label="ID" width="60" />
       <el-table-column prop="username" label="用户名" min-width="140" />
       <el-table-column prop="real_name" label="姓名" width="120" />
@@ -38,10 +42,11 @@
       <el-table-column label="角色" width="130">
         <template #default="{ row }">
           <el-select
-            v-model="row.role"
+            :model-value="row.role"
             size="small"
             @change="(value) => changeRole(row, value)"
-            :disabled="row.id === currentUserId"
+            :loading="roleUpdating.has(row.id)"
+            :disabled="row.id === currentUserId || roleUpdating.has(row.id)"
           >
             <el-option label="学生" value="student" />
             <el-option label="教师" value="teacher" />
@@ -81,11 +86,15 @@ import { ElMessage } from 'element-plus'
 import { userApi } from '@/api'
 import { useUserStore } from '@/stores/user'
 import { createUploadForm, downloadBlob } from '@/utils/download'
+import { commitRoleChange } from '@/utils/userRole'
+import { formatAppDateTime } from '@/utils/examTime'
 
 const loading = ref(true)
+const loadError = ref(false)
 const users = ref([])
 const userStore = useUserStore()
 const currentUserId = userStore.user?.id
+const roleUpdating = ref(new Set())
 const filters = ref({
   keyword: '',
   class_name: null,
@@ -106,13 +115,16 @@ function buildParams() {
 }
 
 function formatTime(value) {
-  return value ? new Date(value).toLocaleString() : '-'
+  return formatAppDateTime(value)
 }
 
 async function fetchUsers() {
   loading.value = true
+  loadError.value = false
   try {
     users.value = await userApi.list(buildParams())
+  } catch {
+    loadError.value = true
   } finally {
     loading.value = false
   }
@@ -131,13 +143,16 @@ function resetFilters() {
 }
 
 async function changeRole(row, role) {
-  const prev = row.role
+  roleUpdating.value = new Set(roleUpdating.value).add(row.id)
   try {
-    await userApi.setRole(row.id, role)
+    await commitRoleChange(row, role, (newRole) => userApi.setRole(row.id, newRole))
     ElMessage.success('角色已更新')
   } catch {
-    row.role = prev
-    ElMessage.error('角色更新失败')
+    // The request interceptor has already displayed the server's explanation.
+  } finally {
+    const next = new Set(roleUpdating.value)
+    next.delete(row.id)
+    roleUpdating.value = next
   }
 }
 

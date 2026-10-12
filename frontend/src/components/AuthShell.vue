@@ -24,5 +24,7 @@
   </div>
 </template>
 <script setup>
+import { Document, Notebook, Reading, TrendCharts } from '@element-plus/icons-vue'
+
 defineProps({ register: Boolean })
 </script>

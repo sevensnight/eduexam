@@ -33,7 +33,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             try {
                 Long userId = jwtUtil.getUserIdFromToken(token);
                 User user = userMapper.selectById(userId);
-                if (user != null && Boolean.TRUE.equals(user.getIsActive())) {
+                int storedTokenVersion = user != null && user.getTokenVersion() != null
+                        ? user.getTokenVersion() : 0;
+                if (user != null && Boolean.TRUE.equals(user.getIsActive())
+                        && RolePolicy.isSupported(user.getRole())
+                        && storedTokenVersion == jwtUtil.getTokenVersionFromToken(token)) {
                     LoginUser loginUser = new LoginUser(user);
                     UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(
                             loginUser, null,
