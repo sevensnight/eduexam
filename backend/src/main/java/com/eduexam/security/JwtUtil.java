@@ -2,6 +2,7 @@ package com.eduexam.security;
 
 import io.jsonwebtoken.*;
 import io.jsonwebtoken.security.Keys;
+import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -18,13 +19,23 @@ public class JwtUtil {
     @Value("${app.jwt.expiration-minutes}")
     private int expirationMinutes;
 
+    @PostConstruct
+    void validateConfiguration() {
+        int length = secret != null ? secret.getBytes(StandardCharsets.UTF_8).length : 0;
+        if (length < 32)
+            throw new IllegalStateException("APP_JWT_SECRET must contain at least 32 UTF-8 bytes");
+        if (java.util.Set.of(
+                "CHANGE_ME",
+                "replace-with-a-random-secret-of-at-least-32-characters",
+                "eduexam-local-development-secret-change-me-32-chars"
+        ).contains(secret))
+            throw new IllegalStateException("APP_JWT_SECRET must be replaced with a private random secret");
+        if (expirationMinutes <= 0)
+            throw new IllegalStateException("app.jwt.expiration-minutes must be positive");
+    }
+
     private SecretKey getKey() {
         byte[] keyBytes = secret.getBytes(StandardCharsets.UTF_8);
-        if (keyBytes.length < 32) {
-            byte[] paddedKey = new byte[32];
-            System.arraycopy(keyBytes, 0, paddedKey, 0, keyBytes.length);
-            return Keys.hmacShaKeyFor(paddedKey);
-        }
         return Keys.hmacShaKeyFor(keyBytes);
     }
 

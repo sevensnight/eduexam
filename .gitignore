@@ -29,3 +29,4 @@ eduexam_backup*.sql
 .env
 .env.*
 !.env.example
+.eduexam.local.bat
