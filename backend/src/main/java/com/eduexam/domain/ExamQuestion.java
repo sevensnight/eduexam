@@ -11,5 +11,5 @@ public class ExamQuestion {
     private Long examId;
     private Long questionId;
     private Integer orderNum;
-    private Integer score;
+    private Double score;
 }

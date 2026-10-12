@@ -14,6 +14,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -28,6 +29,7 @@ import java.util.stream.Collectors;
 public class QuestionController {
 
     private final QuestionMapper questionMapper;
+    private final ExamQuestionMapper examQuestionMapper;
     private final QuestionTagMapper questionTagMapper;
     private final TagMapper tagMapper;
     private final CategoryMapper categoryMapper;
@@ -79,6 +81,16 @@ public class QuestionController {
         List<Long> tagIds = questionTagMapper.findTagIdsByQuestionId(questionId);
         if (tagIds.isEmpty()) return List.of();
         return tagMapper.selectBatchIds(tagIds);
+    }
+
+    private boolean hasExamReferences(Long questionId) {
+        return examQuestionMapper.selectCount(new LambdaQueryWrapper<ExamQuestion>()
+                .eq(ExamQuestion::getQuestionId, questionId)) > 0;
+    }
+
+    private Question lockQuestion(Long questionId) {
+        return questionMapper.selectOne(new LambdaQueryWrapper<Question>()
+                .eq(Question::getId, questionId).last("FOR UPDATE"));
     }
 
     private QuestionQueryDTO buildQuery(Long ownerId, Integer categoryId, String difficulty,
@@ -167,12 +179,28 @@ public class QuestionController {
     }
 
     @PostMapping("/import")
+    @Transactional
     public Map<String, Object> importQuestions(@RequestParam("file") MultipartFile file,
                                                 @AuthenticationPrincipal LoginUser loginUser) throws Exception {
         if (!"admin".equals(loginUser.getRole()) && !"teacher".equals(loginUser.getRole()))
             throw AppException.forbidden("无权访问");
         List<Map<String, String>> rows = excelService.parse(file.getOriginalFilename(), file.getBytes());
         if (rows.isEmpty()) return Map.of("total", 0, "created", 0, "updated", 0, "errors", List.of());
+
+        // Lock all existing imported questions in ID order so a bulk import
+        // cannot deadlock with exam creation that locks the same questions.
+        Set<Long> importedIds = new TreeSet<>();
+        for (Map<String, String> row : rows) {
+            String rawId = coalesce(row, "id", null);
+            try {
+                if (rawId != null && !rawId.isBlank()) importedIds.add(Long.parseLong(rawId.strip()));
+            } catch (NumberFormatException ignored) { }
+        }
+        Map<Long, Question> lockedExistingQuestions = new HashMap<>();
+        for (Long importedId : importedIds) {
+            Question locked = lockQuestion(importedId);
+            if (locked != null) lockedExistingQuestions.put(importedId, locked);
+        }
 
         Map<String, Tag> tagCache = new HashMap<>();
         tagMapper.selectList(null).forEach(t -> tagCache.put(t.getName().toLowerCase(), t));
@@ -207,11 +235,13 @@ public class QuestionController {
                 Long questionId = null;
                 try { if (rawId != null && !rawId.isBlank()) questionId = Long.parseLong(rawId.strip()); } catch (NumberFormatException ignored) {}
 
-                Question q = questionId != null ? questionMapper.selectById(questionId) : null;
+                Question q = questionId != null ? lockedExistingQuestions.get(questionId) : null;
                 if (questionId != null && q != null && "teacher".equals(loginUser.getRole()) && !loginUser.getUserId().equals(q.getCreatorId()))
                     throw new IllegalArgumentException("teachers can only update their own questions");
 
                 boolean isNew = q == null;
+                if (!isNew && hasExamReferences(q.getId()))
+                    throw new IllegalArgumentException("已被考试引用的试题不可修改");
                 if (isNew) { q = new Question(); q.setCreatorId(loginUser.getUserId()); q.setUsageCount(0); }
                 q.setTitle(title); q.setQuestionType(qType); q.setDifficulty(diff);
                 q.setOptions(options); q.setAnswer(answer); q.setExplanation(explanation);
@@ -242,6 +272,7 @@ public class QuestionController {
     }
 
     @PostMapping
+    @Transactional
     public Map<String, Object> createQuestion(@RequestBody QuestionCreateDTO data,
                                                @AuthenticationPrincipal LoginUser loginUser) {
         if (!"admin".equals(loginUser.getRole()) && !"teacher".equals(loginUser.getRole()))
@@ -260,15 +291,17 @@ public class QuestionController {
     }
 
     @PutMapping("/{questionId}")
+    @Transactional
     public Map<String, Object> updateQuestion(@PathVariable Long questionId,
                                                @RequestBody QuestionCreateDTO data,
                                                @AuthenticationPrincipal LoginUser loginUser) {
         if (!"admin".equals(loginUser.getRole()) && !"teacher".equals(loginUser.getRole()))
             throw AppException.forbidden("无权访问");
-        Question q = questionMapper.selectById(questionId);
+        Question q = lockQuestion(questionId);
         if (q == null) throw AppException.notFound("Question not found");
         if ("teacher".equals(loginUser.getRole()) && !loginUser.getUserId().equals(q.getCreatorId()))
             throw AppException.notFound("Question not found");
+        if (hasExamReferences(questionId)) throw AppException.badRequest("已被考试引用的试题不可修改");
         if (data.getTitle() != null) q.setTitle(data.getTitle());
         if (data.getQuestionType() != null) q.setQuestionType(data.getQuestionType());
         if (data.getDifficulty() != null) q.setDifficulty(data.getDifficulty());
@@ -285,14 +318,16 @@ public class QuestionController {
     }
 
     @DeleteMapping("/{questionId}")
+    @Transactional
     public Map<String, Boolean> deleteQuestion(@PathVariable Long questionId,
                                                 @AuthenticationPrincipal LoginUser loginUser) {
         if (!"admin".equals(loginUser.getRole()) && !"teacher".equals(loginUser.getRole()))
             throw AppException.forbidden("无权访问");
-        Question q = questionMapper.selectById(questionId);
+        Question q = lockQuestion(questionId);
         if (q == null) throw AppException.notFound("Question not found");
         if ("teacher".equals(loginUser.getRole()) && !loginUser.getUserId().equals(q.getCreatorId()))
             throw AppException.notFound("Question not found");
+        if (hasExamReferences(questionId)) throw AppException.badRequest("已被考试引用的试题不可删除");
         questionTagMapper.deleteByQuestionId(questionId);
         questionMapper.deleteById(questionId);
         return Map.of("ok", true);

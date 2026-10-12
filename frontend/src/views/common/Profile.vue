@@ -15,7 +15,8 @@
           <el-input v-model="profileForm.real_name" placeholder="输入真实姓名" />
         </el-form-item>
         <el-form-item label="班级">
-          <el-input v-model="profileForm.class_name" placeholder="可填写班级信息" />
+          <el-input v-if="store.user?.role !== 'student'" v-model="profileForm.class_name" placeholder="由管理员维护" />
+          <el-input v-else :value="profileForm.class_name" disabled />
         </el-form-item>
         <el-form-item>
           <el-button type="primary" :loading="profileLoading" @click="saveProfile">保存</el-button>
@@ -63,10 +64,11 @@ const profileLoading = ref(false)
 async function saveProfile() {
   profileLoading.value = true
   try {
-    const updated = await authApi.updateProfile({
+    const payload = {
       real_name: profileForm.value.real_name,
-      class_name: profileForm.value.class_name,
-    })
+    }
+    if (store.user?.role !== 'student') payload.class_name = profileForm.value.class_name
+    const updated = await authApi.updateProfile(payload)
     store.setAuth(store.token, updated)
     ElMessage.success('保存成功')
   } finally {

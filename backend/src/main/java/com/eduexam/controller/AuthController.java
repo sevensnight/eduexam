@@ -46,8 +46,6 @@ public class AuthController {
         @Size(max = 64, message = "真实姓名长度不能超过 64 位")
         private String realName;
 
-        @Size(max = 64, message = "班级长度不能超过 64 位")
-        private String className;
     }
 
     @Data
@@ -119,7 +117,8 @@ public class AuthController {
         user.setEmail(email);
         user.setHashedPassword(passwordEncoder.encode(req.getPassword()));
         user.setRealName(req.getRealName());
-        user.setClassName(req.getClassName());
+        // Class membership is assigned by an administrator.  Never trust a
+        // self-reported class because it is used for exam eligibility checks.
         // Public registration must never be able to create privileged accounts.
         // Teachers and administrators are created by an authenticated administrator.
         user.setRole("student");
@@ -150,6 +149,9 @@ public class AuthController {
                                               @AuthenticationPrincipal LoginUser loginUser) {
         User user = loginUser.getUser();
         if (req.getRealName() != null) user.setRealName(req.getRealName());
+        if (req.getClassName() != null && "student".equals(user.getRole())
+                && !java.util.Objects.equals(req.getClassName(), user.getClassName()))
+            throw AppException.forbidden("学生班级由管理员维护");
         if (req.getClassName() != null) user.setClassName(req.getClassName());
         userMapper.updateById(user);
         User updated = userMapper.selectById(user.getId());

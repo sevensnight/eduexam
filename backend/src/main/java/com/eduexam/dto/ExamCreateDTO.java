@@ -1,5 +1,6 @@
 package com.eduexam.dto;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
 import lombok.Data;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -14,6 +15,7 @@ public class ExamCreateDTO {
     private String status;
     private LocalDateTime openTime;
     private LocalDateTime closeTime;
+    @JsonAlias("duration_minutes")
     private Integer timeLimit;
     private Integer maxAttempts;
     private Boolean allowRetake;

@@ -1,6 +1,6 @@
 <template>
   <div class="exam-page" v-loading="loading">
-    <div v-if="exam && !submitted" class="exam-layout">
+    <div v-if="exam && record && !submitted" class="exam-layout">
       <!-- 左侧进度导航 -->
       <div class="progress-nav">
         <div class="nav-title">答题进度</div>
@@ -76,7 +76,24 @@
       </div>
     </div>
 
-    <el-result v-if="submitted" icon="success" title="答卷已提交" :sub-title="`得分：${recordResult?.total_score ?? '-'} 分`">
+    <el-result
+      v-else-if="!loading && startError"
+      icon="warning"
+      title="无法开始考试"
+      :sub-title="startError"
+    >
+      <template #extra>
+        <el-button type="primary" @click="router.push('/exams')">返回考试列表</el-button>
+        <el-button @click="router.push('/my-records')">查看考试记录</el-button>
+      </template>
+    </el-result>
+
+    <el-result
+      v-if="submitted"
+      :icon="recordResult?.timed_out ? 'warning' : 'success'"
+      :title="recordResult?.timed_out ? '考试已截止' : '答卷已提交'"
+      :sub-title="submitResultText"
+    >
       <template #extra>
         <el-button type="primary" @click="$router.push(`/exams/${examId}/result`)">查看详情</el-button>
         <el-button @click="$router.push(`/exams/${examId}/leaderboard`)">排行榜</el-button>
@@ -103,25 +120,114 @@ const submitted = ref(false)
 const exam = ref(null)
 const record = ref(null)
 const recordResult = ref(null)
+const startError = ref('')
 const answers = reactive({})
 const multiAnswers = reactive({})
 const timeLeft = ref(0)
 let timer = null
+let serverDraftTimer = null
+let draftSaveInFlight = false
+let draftSavePending = false
+let draftRetryCount = 0
 let warnedFiveMin = false
+let autoSubmitNotified = false
+const AUTO_SUBMIT_LEAD_SECONDS = 5
 
-function draftKey() { return `exam_draft_${store.user?.id || 'guest'}_${examId.value}` }
+const submitResultText = computed(() => {
+  if (recordResult.value?.timed_out) return '已超过作答截止时间，系统已按最后保存的答题草稿结算'
+  if (!recordResult.value?.result_released) return '提交成功，成绩将在考试结束并完成批改后公布'
+  return `得分：${recordResult.value?.total_score ?? '-'} 分`
+})
+
+function draftKey() {
+  return `exam_draft_${store.user?.id || 'guest'}_${examId.value}_${record.value?.id || 'no-record'}`
+}
 function saveDraft() {
-  sessionStorage.setItem(draftKey(), JSON.stringify({ answers: { ...answers }, multiAnswers: { ...multiAnswers } }))
+  sessionStorage.setItem(draftKey(), JSON.stringify({
+    record_id: record.value?.id,
+    answers: { ...answers },
+    multiAnswers: { ...multiAnswers },
+  }))
 }
 function clearDraft() { sessionStorage.removeItem(draftKey()) }
+function restoreServerDraft() {
+  for (const item of record.value?.draft_answers || []) {
+    const question = exam.value?.exam_questions?.find(eq => eq.question_id === item.question_id)
+    if (!question || !item.user_answer) continue
+    if (question.question_type === 'multiple') {
+      multiAnswers[item.question_id] = item.user_answer.split(',').filter(Boolean)
+    } else {
+      answers[item.question_id] = item.user_answer
+    }
+  }
+}
 function restoreDraft() {
   try {
     const raw = sessionStorage.getItem(draftKey())
     if (!raw) return
-    const { answers: a, multiAnswers: m } = JSON.parse(raw)
+    const { record_id: savedRecordId, answers: a, multiAnswers: m } = JSON.parse(raw)
+    if (savedRecordId !== record.value?.id) return
     Object.assign(answers, a)
     Object.assign(multiAnswers, m)
   } catch {}
+}
+
+function buildAnswerList() {
+  return exam.value.exam_questions.map(eq => {
+    let userAnswer = ''
+    if (eq.question_type === 'multiple') {
+      userAnswer = [...(multiAnswers[eq.question_id] || [])].sort().join(',')
+    } else {
+      userAnswer = answers[eq.question_id] || ''
+    }
+    return { question_id: eq.question_id, user_answer: userAnswer }
+  })
+}
+
+async function saveServerDraft() {
+  if (!record.value || submitted.value || record.value.status !== 'in_progress') return
+  if (draftSaveInFlight) {
+    draftSavePending = true
+    return
+  }
+  draftSaveInFlight = true
+  try {
+    await examApi.saveDraft(examId.value, {
+      record_id: record.value.id,
+      answers: buildAnswerList(),
+    })
+    draftRetryCount = 0
+  } catch (error) {
+    if (!submitted.value && draftRetryCount < 3) {
+      const retryDelay = 1000 * (2 ** draftRetryCount)
+      draftRetryCount++
+      scheduleServerDraft(retryDelay)
+    }
+    throw error
+  } finally {
+    draftSaveInFlight = false
+    if (draftSavePending) {
+      draftSavePending = false
+      scheduleServerDraft(0)
+    }
+  }
+}
+
+function scheduleServerDraft(delay) {
+  clearTimeout(serverDraftTimer)
+  serverDraftTimer = setTimeout(() => {
+    saveServerDraft().catch(() => {})
+  }, delay)
+}
+
+function queueServerDraft() {
+  draftRetryCount = 0
+  scheduleServerDraft(800)
+}
+
+function persistDraft() {
+  saveDraft()
+  queueServerDraft()
 }
 
 function formatTime(secs) {
@@ -174,70 +280,94 @@ async function doSubmit() {
   if (submitting.value || !record.value) return
   submitting.value = true
   try {
-    const answerList = exam.value.exam_questions.map(eq => {
-      let userAnswer = ''
-      if (eq.question_type === 'multiple') {
-        userAnswer = (multiAnswers[eq.question_id] || []).sort().join(',')
-      } else {
-        userAnswer = answers[eq.question_id] || ''
-      }
-      return { question_id: eq.question_id, user_answer: userAnswer }
-    })
+    clearTimeout(serverDraftTimer)
+    draftSavePending = false
+    const answerList = buildAnswerList()
     const res = await examApi.submit(examId.value, { record_id: record.value.id, answers: answerList })
     recordResult.value = res
     submitted.value = true
     clearInterval(timer)
     clearDraft()
-    ElMessage.success(`提交成功，得分：${res.total_score} 分`)
+    if (res.timed_out) {
+      ElMessage.warning('考试已超时，系统已按最后保存的答题草稿结算')
+    } else {
+      ElMessage.success(res.result_released ? `提交成功，得分：${res.total_score} 分` : '提交成功，成绩将在考试结束并完成批改后公布')
+    }
   } finally {
     submitting.value = false
   }
 }
 
+function triggerAutoSubmit() {
+  if (!autoSubmitNotified) {
+    autoSubmitNotified = true
+    ElMessage.warning('考试即将截止，正在自动提交答卷')
+  }
+  if (!submitting.value && !submitted.value) {
+    // Keep the countdown alive until submission succeeds. If a transient
+    // request fails, the next tick retries while the local draft is retained.
+    doSubmit().catch(() => {})
+  }
+}
+
 onMounted(async () => {
   try {
-    exam.value = await examApi.get(examId.value)
+    exam.value = await examApi.get(examId.value).catch(err => {
+      startError.value = err?.response?.data?.detail || '无法读取考试信息'
+      return null
+    })
+    if (!exam.value) return
     record.value = await examApi.start(examId.value).catch(err => {
       const msg = err?.response?.data?.detail || '无法开始考试'
-      ElMessage.error(msg)
+      startError.value = msg
       return null
     })
 
     if (!record.value) return
 
-    if (record.value.status === 'completed') {
-      submitted.value = true
+    if (record.value.status !== 'in_progress') {
       recordResult.value = record.value
+      submitted.value = true
+      clearDraft()
       return
     }
 
     const totalSecs = exam.value.duration_minutes * 60
     const rawStarted = record.value.started_at || ''
-    const startedAt = new Date(rawStarted.includes('Z') || rawStarted.includes('+') ? rawStarted : rawStarted + 'Z')
+    // The API uses Asia/Shanghai wall-clock LocalDateTime values. Do not
+    // append `Z`, which would reinterpret the local timestamp as UTC.
+    const startedAt = new Date(rawStarted)
     const elapsed = Math.floor((Date.now() - startedAt.getTime()) / 1000)
-    timeLeft.value = Math.max(totalSecs - elapsed, 0)
-
-    if (timeLeft.value <= 0) {
-      ElMessage.warning('时间到！自动提交答卷')
-      doSubmit()
-      return
+    let remaining = totalSecs - elapsed
+    if (exam.value.close_time) {
+      const closeAt = new Date(exam.value.close_time)
+      if (!Number.isNaN(closeAt.getTime())) {
+        remaining = Math.min(remaining, Math.floor((closeAt.getTime() - Date.now()) / 1000))
+      }
     }
-
+    timeLeft.value = Math.max(remaining, 0)
+    // Restore persisted answers before any near-deadline auto-submit. A refresh
+    // during the final seconds must not replace the student's draft with blanks.
+    restoreServerDraft()
     restoreDraft()
-    watch([answers, multiAnswers], saveDraft, { deep: true })
+    watch([answers, multiAnswers], persistDraft, { deep: true })
+    // Reconcile the freshest local/session draft back to MySQL after a refresh.
+    queueServerDraft()
+
+    if (timeLeft.value <= AUTO_SUBMIT_LEAD_SECONDS) {
+      triggerAutoSubmit()
+    }
 
     if (timeLeft.value <= 300) warnedFiveMin = true
 
     timer = setInterval(() => {
-      timeLeft.value--
+      timeLeft.value = Math.max(timeLeft.value - 1, 0)
       if (!warnedFiveMin && timeLeft.value <= 300) {
         warnedFiveMin = true
         ElNotification({ title: '时间提醒', message: '距离考试结束还有 5 分钟，请尽快完成！', type: 'warning', duration: 8000 })
       }
-      if (timeLeft.value <= 0) {
-        clearInterval(timer)
-        ElMessage.warning('时间到！自动提交答卷')
-        doSubmit()
+      if (timeLeft.value <= AUTO_SUBMIT_LEAD_SECONDS) {
+        triggerAutoSubmit()
       }
     }, 1000)
   } finally {
@@ -245,7 +375,12 @@ onMounted(async () => {
   }
 })
 
-onUnmounted(() => clearInterval(timer))
+onUnmounted(() => {
+  clearInterval(timer)
+  clearTimeout(serverDraftTimer)
+  draftSavePending = false
+  draftRetryCount = 0
+})
 </script>
 
 <style scoped>

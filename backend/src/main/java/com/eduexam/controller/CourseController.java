@@ -8,6 +8,7 @@ import com.eduexam.domain.User;
 import com.eduexam.dto.CourseEnrollmentUpdateDTO;
 import com.eduexam.mapper.CourseEnrollmentMapper;
 import com.eduexam.mapper.CourseMapper;
+import com.eduexam.mapper.ExamMapper;
 import com.eduexam.mapper.UserMapper;
 import com.eduexam.security.LoginUser;
 import lombok.Data;
@@ -25,8 +26,14 @@ import java.util.stream.Collectors;
 public class CourseController {
 
     private final CourseMapper courseMapper;
+    private final ExamMapper examMapper;
     private final CourseEnrollmentMapper enrollmentMapper;
     private final UserMapper userMapper;
+
+    private Course lockCourse(Long courseId) {
+        return courseMapper.selectOne(new LambdaQueryWrapper<Course>()
+                .eq(Course::getId, courseId).last("FOR UPDATE"));
+    }
 
     @Data
     static class CourseCreateRequest {
@@ -180,12 +187,13 @@ public class CourseController {
     }
 
     @PutMapping("/{courseId}")
+    @Transactional
     public Map<String, Object> updateCourse(@PathVariable Long courseId,
                                              @RequestBody CourseUpdateRequest req,
                                              @AuthenticationPrincipal LoginUser loginUser) {
         if (!"admin".equals(loginUser.getRole()) && !"teacher".equals(loginUser.getRole()))
             throw AppException.forbidden("无权访问");
-        Course c = courseMapper.selectById(courseId);
+        Course c = lockCourse(courseId);
         if (c == null) throw AppException.notFound("课程不存在");
         if ("teacher".equals(loginUser.getRole()) && !loginUser.getUserId().equals(c.getTeacherId()))
             throw AppException.forbidden("无权管理该课程");
@@ -210,7 +218,7 @@ public class CourseController {
                                                    @AuthenticationPrincipal LoginUser loginUser) {
         if (!"admin".equals(loginUser.getRole()) && !"teacher".equals(loginUser.getRole()))
             throw AppException.forbidden("无权访问");
-        Course c = courseMapper.selectById(courseId);
+        Course c = lockCourse(courseId);
         if (c == null) throw AppException.notFound("课程不存在");
         if ("teacher".equals(loginUser.getRole()) && !loginUser.getUserId().equals(c.getTeacherId()))
             throw AppException.forbidden("无权管理该课程");
@@ -236,14 +244,18 @@ public class CourseController {
     }
 
     @DeleteMapping("/{courseId}")
+    @Transactional
     public Map<String, Boolean> deleteCourse(@PathVariable Long courseId,
                                               @AuthenticationPrincipal LoginUser loginUser) {
         if (!"admin".equals(loginUser.getRole()) && !"teacher".equals(loginUser.getRole()))
             throw AppException.forbidden("无权访问");
-        Course c = courseMapper.selectById(courseId);
+        Course c = lockCourse(courseId);
         if (c == null) throw AppException.notFound("课程不存在");
         if ("teacher".equals(loginUser.getRole()) && !loginUser.getUserId().equals(c.getTeacherId()))
             throw AppException.forbidden("无权管理该课程");
+        if (examMapper.selectCount(new LambdaQueryWrapper<com.eduexam.domain.Exam>()
+                .eq(com.eduexam.domain.Exam::getCourseId, courseId)) > 0)
+            throw AppException.badRequest("已有考试引用该课程，不能删除");
         enrollmentMapper.delete(new LambdaQueryWrapper<CourseEnrollment>().eq(CourseEnrollment::getCourseId, courseId));
         courseMapper.deleteById(courseId);
         return Map.of("ok", true);
