@@ -7,9 +7,6 @@
       <el-form-item prop="real_name" label="真实姓名">
         <el-input v-model="form.real_name" placeholder="输入你的姓名" autocomplete="name" />
       </el-form-item>
-      <el-form-item prop="class_name" label="班级">
-        <el-input v-model="form.class_name" placeholder="学生建议填写" />
-      </el-form-item>
       <el-form-item prop="email" label="邮箱">
         <el-input v-model="form.email" placeholder="输入邮箱地址" autocomplete="email" />
       </el-form-item>
@@ -40,7 +37,6 @@ const form = ref({
   email: '',
   password: '',
   real_name: '',
-  class_name: '',
 })
 
 const rules = {

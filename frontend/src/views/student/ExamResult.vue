@@ -10,7 +10,13 @@
       <el-card style="margin-bottom:16px">
         <el-descriptions :title="`考试结果 - ${exam?.title || ''}`" :column="3" border>
           <el-descriptions-item label="得分">
-            <span v-if="record.essay_graded" style="font-size:24px;font-weight:bold;color:#409EFF">
+            <span v-if="record.status === 'in_progress'" style="font-size:16px;color:#909399">
+              尚未提交
+            </span>
+            <span v-else-if="!record.result_released" style="font-size:16px;color:#909399">
+              成绩暂未公布
+            </span>
+            <span v-else-if="record.essay_graded" style="font-size:24px;font-weight:bold;color:#409EFF">
               {{ record.total_score ?? '-' }}
             </span>
             <span v-else style="font-size:16px;color:#E6A23C">
@@ -19,8 +25,8 @@
             </span>
           </el-descriptions-item>
           <el-descriptions-item label="状态">
-            <el-tag :type="record.essay_graded ? 'success' : 'warning'">
-              {{ record.essay_graded ? '已出分' : '主观题待批改' }}
+            <el-tag :type="resultStatus.type">
+              {{ resultStatus.text }}
             </el-tag>
           </el-descriptions-item>
           <el-descriptions-item label="提交时间">
@@ -40,17 +46,17 @@
             <span style="flex-shrink:0;font-weight:bold;color:#606266">{{ idx + 1 }}.</span>
             <span style="flex:1">{{ row.title }}</span>
             <el-tag size="small" :type="typeTag(row.type)" style="flex-shrink:0">{{ typeLabel(row.type) }}</el-tag>
-            <el-tag v-if="row.is_correct === 'Y'" type="success" size="small">正确</el-tag>
-            <el-tag v-else-if="row.is_correct === 'N'" type="danger" size="small">错误</el-tag>
-            <el-tag v-else-if="row.is_correct === 'P' && row.type === 'essay' && !record.essay_graded" type="warning" size="small">待批改</el-tag>
-            <el-tag v-else-if="row.is_correct === 'P' && row.type === 'essay'" type="warning" size="small">部分得分</el-tag>
-            <el-tag v-else-if="row.is_correct === 'P'" type="warning" size="small">部分正确</el-tag>
-            <span style="flex-shrink:0;font-size:13px;color:#409EFF;font-weight:bold">
+            <el-tag v-if="record.result_released && row.is_correct === 'Y'" type="success" size="small">正确</el-tag>
+            <el-tag v-else-if="record.result_released && row.is_correct === 'N'" type="danger" size="small">错误</el-tag>
+            <el-tag v-else-if="record.result_released && row.is_correct === 'P' && row.type === 'essay' && !record.essay_graded" type="warning" size="small">待批改</el-tag>
+            <el-tag v-else-if="record.result_released && row.is_correct === 'P' && row.type === 'essay'" type="warning" size="small">部分得分</el-tag>
+            <el-tag v-else-if="record.result_released && row.is_correct === 'P'" type="warning" size="small">部分正确</el-tag>
+            <span v-if="record.result_released" style="flex-shrink:0;font-size:13px;color:#409EFF;font-weight:bold">
               <template v-if="row.score_got !== null">{{ row.score_got }}/{{ row.max_score }}分</template>
               <template v-else><span style="color:#E6A23C">待批改</span></template>
             </span>
             <el-button
-              v-if="store.isStudent && row.is_correct === 'N' && row.user_answer"
+              v-if="store.isStudent && record.result_released && row.is_correct === 'N' && row.user_answer"
               link
               :type="wrongBookIds.has(row.question_id) ? 'warning' : 'info'"
               size="small"
@@ -60,18 +66,19 @@
           </div>
           <div style="font-size:13px;color:#606266;line-height:1.8;padding-left:18px">
             <div><span style="color:#909399">我的答案：</span>{{ row.user_answer || '（未作答）' }}</div>
-            <div v-if="row.type !== 'essay' || record.essay_graded">
+            <div v-if="record.result_released && row.correct_answer != null">
               <span style="color:#909399">正确答案：</span>
               <span :style="row.is_correct !== 'Y' ? 'color:#67C23A;font-weight:bold' : ''">{{ row.correct_answer }}</span>
             </div>
-            <div v-if="row.explanation" style="margin-top:4px;background:#F5F7FA;padding:6px 10px;border-radius:4px">
+            <div v-if="record.result_released && row.explanation" style="margin-top:4px;background:#F5F7FA;padding:6px 10px;border-radius:4px">
               <span style="color:#909399">解析：</span>{{ row.explanation }}
             </div>
           </div>
         </div>
       </el-card>
 
-      <el-button type="primary" plain @click="$router.push(`/exams/${examId}/leaderboard`)">查看排行榜</el-button>
+      <el-button v-if="record.status === 'in_progress'" type="primary" @click="$router.push(`/exams/${examId}/take`)">继续考试</el-button>
+      <el-button v-else-if="record.result_released" type="primary" plain @click="$router.push(`/exams/${examId}/leaderboard`)">查看排行榜</el-button>
     </template>
   </div>
 </template>
@@ -92,6 +99,13 @@ const exam = ref(null)
 const record = ref(null)
 const wrongBookIds = ref(new Set())
 
+const resultStatus = computed(() => {
+  if (record.value?.status === 'in_progress') return { type: 'primary', text: '进行中' }
+  if (record.value?.status === 'submitted' || !record.value?.essay_graded) return { type: 'warning', text: '主观题待批改' }
+  if (!record.value?.result_released) return { type: 'info', text: '成绩暂未公布' }
+  return { type: 'success', text: '已出分' }
+})
+
 function typeTag(type) {
   return { single: '', multiple: 'warning', truefalse: 'success', essay: 'info' }[type] || ''
 }
@@ -107,7 +121,7 @@ const answerRows = computed(() => {
     title: answer.question_title || `题目#${answer.question_id}`,
     type: answer.question_type || '',
     max_score: answer.max_score ?? '-',
-    correct_answer: answer.correct_answer || '-',
+    correct_answer: answer.correct_answer ?? null,
     explanation: answer.explanation || '',
   }))
 })
@@ -135,9 +149,10 @@ async function toggleWrong(questionId) {
 onMounted(async () => {
   try {
     exam.value = await examApi.get(examId.value).catch(() => null)
-    record.value = await examApi.myRecord(examId.value).catch(() => null)
+    const response = await examApi.myRecord(examId.value).catch(() => null)
+    record.value = response?.exists ? response : null
 
-    if (store.isStudent) {
+    if (store.isStudent && record.value?.result_released) {
       const response = await studentApi.wrongBookIds().catch(() => ({ ids: [] }))
       wrongBookIds.value = new Set(response.ids || [])
     }

@@ -252,6 +252,7 @@ async function submit() {
   try {
     const payload = {
       ...form.value,
+      time_limit: form.value.duration_minutes,
       total_score: totalScore.value,
       pass_score: passScore.value,
       course_id: form.value.course_id || null,
@@ -275,9 +276,13 @@ async function submit() {
 
 function toApiDate(value) {
   if (!value) return null
-  if (value instanceof Date) return value.toISOString()
   const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? null : date.toISOString()
+  if (Number.isNaN(date.getTime())) return null
+  // The backend stores LocalDateTime in the application timezone
+  // (Asia/Shanghai). Sending an ISO string with `Z` would shift the exam by
+  // eight hours when Jackson parses it into LocalDateTime.
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
 }
 
 onMounted(async () => {

@@ -9,6 +9,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.ZoneId;
+
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -16,6 +18,8 @@ import java.util.stream.Collectors;
 @RequestMapping("/api/stats")
 @RequiredArgsConstructor
 public class StatsController {
+
+    private static final ZoneId APP_ZONE = ZoneId.of("Asia/Shanghai");
 
     private final ExamMapper examMapper;
     private final ExamQuestionMapper examQuestionMapper;
@@ -37,6 +41,13 @@ public class StatsController {
                 new LambdaQueryWrapper<CourseEnrollment>()
                         .eq(CourseEnrollment::getCourseId, exam.getCourseId())
                         .eq(CourseEnrollment::getStudentId, studentId)) > 0;
+    }
+
+    private boolean isStatsReleased(Exam exam) {
+        if ("closed".equals(exam.getStatus())) return true;
+        return "published".equals(exam.getStatus())
+                && exam.getCloseTime() != null
+                && !java.time.LocalDateTime.now(APP_ZONE).isBefore(exam.getCloseTime());
     }
 
     @GetMapping("/categories")
@@ -91,7 +102,7 @@ public class StatsController {
         if ("student".equals(loginUser.getRole())) {
             if (!Boolean.TRUE.equals(exam.getScorePublic()) || !canStudentAccessExam(exam, loginUser.getUserId()))
                 throw AppException.forbidden("无权查看该考试统计");
-            if (!List.of("published", "closed").contains(exam.getStatus()))
+            if (!isStatsReleased(exam))
                 throw AppException.forbidden("考试统计尚未开放");
         }
         if ("teacher".equals(loginUser.getRole()) && !loginUser.getUserId().equals(exam.getTeacherId()))
@@ -141,7 +152,7 @@ public class StatsController {
         if ("student".equals(loginUser.getRole())) {
             if (!Boolean.TRUE.equals(exam.getScorePublic()) || !canStudentAccessExam(exam, loginUser.getUserId()))
                 throw AppException.forbidden("无权查看该考试统计");
-            if (!List.of("published", "closed").contains(exam.getStatus()))
+            if (!isStatsReleased(exam))
                 throw AppException.forbidden("考试统计尚未开放");
         }
         if ("teacher".equals(loginUser.getRole()) && !loginUser.getUserId().equals(exam.getTeacherId()))

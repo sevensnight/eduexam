@@ -6,5 +6,5 @@ import lombok.Data;
 public class ExamQuestionItemDTO {
     private Long questionId;
     private Integer orderNum;
-    private Integer score;
+    private Double score;
 }

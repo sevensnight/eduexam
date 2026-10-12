@@ -19,7 +19,9 @@ request.interceptors.response.use(
   (res) => res.data,
   (err) => {
     const msg = err.response?.data?.detail || err.message || '请求失败'
-    ElMessage.error(typeof msg === 'string' ? msg : JSON.stringify(msg))
+    if (!err.config?.suppressError) {
+      ElMessage.error(typeof msg === 'string' ? msg : JSON.stringify(msg))
+    }
     if (err.response?.status === 401) {
       clearStoredAuth()
       window.location.href = '/login'

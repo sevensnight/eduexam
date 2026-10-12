@@ -9,6 +9,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -16,6 +18,8 @@ import java.util.stream.Collectors;
 @RequestMapping("/api/student")
 @RequiredArgsConstructor
 public class StudentController {
+
+    private static final ZoneId APP_ZONE = ZoneId.of("Asia/Shanghai");
 
     private final ExamMapper examMapper;
     private final ExamRecordMapper examRecordMapper;
@@ -46,9 +50,11 @@ public class StudentController {
             m.put("score_public", e != null ? e.getScorePublic() : null);
             m.put("status", r.getStatus()); m.put("started_at", r.getStartedAt());
             m.put("submitted_at", r.getSubmittedAt());
-            boolean isGraded = "graded".equals(r.getStatus());
-            // total_score: always show student their own score (score_public only affects class stats/leaderboard)
-            m.put("total_score", r.getTotalScore());
+            boolean released = "graded".equals(r.getStatus()) && canRevealAnswerKey(e);
+            boolean isGraded = released;
+            // Do not expose objective scores before the answer-release time.
+            m.put("total_score", released ? r.getTotalScore() : null);
+            m.put("result_released", released);
             m.put("attempt_count", r.getAttemptCount()); m.put("essay_graded", r.getEssayGraded());
             // passed: null only when not yet fully graded
             Double actualScore = r.getTotalScore(); Double ps = e != null ? e.getPassScore() : null;
@@ -71,11 +77,13 @@ public class StudentController {
 
         Set<Long> questionIds = entries.stream().map(WrongBookEntry::getQuestionId).collect(Collectors.toSet());
 
-        // Load student's exam records (graded/submitted) ordered by most recent first
+        // Only fully graded records may reveal answer keys.  A submitted
+        // record can still be followed by a retake, so exposing answers while
+        // essay grading is pending would undermine the exam.
         List<ExamRecord> records = examRecordMapper.selectList(
                 new LambdaQueryWrapper<ExamRecord>()
                         .eq(ExamRecord::getStudentId, loginUser.getUserId())
-                        .in(ExamRecord::getStatus, "graded", "submitted")
+                        .eq(ExamRecord::getStatus, "graded")
                         .orderByDesc(ExamRecord::getSubmittedAt));
         List<Long> recordIds = records.stream().map(ExamRecord::getId).collect(Collectors.toList());
 
@@ -101,13 +109,14 @@ public class StudentController {
         Map<Long, String> userAnswerByQid = new HashMap<>();
         Map<Long, String> examTitleByQid = new HashMap<>();
         for (ExamRecord r : records) {
+            Exam exam = examMap.get(examIdByRecord.get(r.getId()));
+            if (!canRevealAnswerKey(exam)) continue;
             Map<Long, Answer> byQ = answersByRecord.getOrDefault(r.getId(), Map.of());
             for (Long qid : questionIds) {
                 if (userAnswerByQid.containsKey(qid)) continue;
                 Answer ans = byQ.get(qid);
-                if (ans != null && !"Y".equals(ans.getIsCorrect())) {
+                if (ans != null && "N".equals(ans.getIsCorrect())) {
                     userAnswerByQid.put(qid, ans.getUserAnswer());
-                    Exam exam = examMap.get(examIdByRecord.get(r.getId()));
                     examTitleByQid.put(qid, exam != null ? exam.getTitle() : null);
                 }
             }
@@ -116,16 +125,26 @@ public class StudentController {
         Map<Long, Category> catMap = categoryMapper.selectList(null).stream()
                 .collect(Collectors.toMap(Category::getId, c -> c));
 
-        return entries.stream().map(wb -> {
+        return entries.stream()
+                .filter(wb -> userAnswerByQid.containsKey(wb.getQuestionId()))
+                .map(wb -> {
             Question q = questionMapper.selectById(wb.getQuestionId());
             List<Long> tagIds = questionTagMapper.findTagIdsByQuestionId(wb.getQuestionId());
             List<Tag> tags = tagIds.isEmpty() ? List.of() : tagMapper.selectBatchIds(tagIds);
+            boolean verifiedWrongAnswer = userAnswerByQid.containsKey(wb.getQuestionId());
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("id", wb.getId()); m.put("added_at", wb.getAddedAt()); m.put("question_id", wb.getQuestionId());
             if (q != null) {
                 m.put("title", q.getTitle()); m.put("question_type", q.getQuestionType());
                 m.put("difficulty", q.getDifficulty()); m.put("options", q.getOptions());
-                m.put("answer", q.getAnswer()); m.put("correct_answer", q.getAnswer()); m.put("explanation", q.getExplanation());
+                // A manually inserted/stale wrong-book row must not become an
+                // answer-key oracle. Only reveal the key for a verified wrong
+                // answer submitted by this student.
+                if (verifiedWrongAnswer) {
+                    m.put("answer", q.getAnswer());
+                    m.put("correct_answer", q.getAnswer());
+                    m.put("explanation", q.getExplanation());
+                }
                 m.put("category_id", q.getCategoryId());
                 Category cat = q.getCategoryId() != null ? catMap.get(q.getCategoryId()) : null;
                 m.put("category_name", cat != null ? cat.getName() : null);
@@ -144,7 +163,9 @@ public class StudentController {
         List<WrongBookEntry> allEntries = wrongBookMapper.selectList(
                 new LambdaQueryWrapper<WrongBookEntry>().eq(WrongBookEntry::getStudentId, loginUser.getUserId()));
         if (allEntries.isEmpty()) return List.of();
-        List<Long> qIds = allEntries.stream().map(WrongBookEntry::getQuestionId).collect(Collectors.toList());
+        Set<Long> candidateIds = allEntries.stream().map(WrongBookEntry::getQuestionId).collect(Collectors.toSet());
+        List<Long> qIds = new ArrayList<>(releasedWrongQuestionIds(loginUser.getUserId(), candidateIds));
+        if (qIds.isEmpty()) return List.of();
         List<Question> questions = questionMapper.selectBatchIds(qIds);
         Map<Long, Long> countByCat = questions.stream().filter(q -> q.getCategoryId() != null)
                 .collect(Collectors.groupingBy(Question::getCategoryId, Collectors.counting()));
@@ -165,13 +186,36 @@ public class StudentController {
     @GetMapping("/wrong-book/ids")
     public Map<String, Object> wrongBookIds(@AuthenticationPrincipal LoginUser loginUser) {
         if (!"student".equals(loginUser.getRole())) throw AppException.forbidden("仅学生可访问");
-        List<Long> ids = wrongBookMapper.selectList(new LambdaQueryWrapper<WrongBookEntry>()
+        Set<Long> candidateIds = wrongBookMapper.selectList(new LambdaQueryWrapper<WrongBookEntry>()
                 .eq(WrongBookEntry::getStudentId, loginUser.getUserId())
                 .select(WrongBookEntry::getQuestionId))
-                .stream().map(WrongBookEntry::getQuestionId).collect(Collectors.toList());
+                .stream().map(WrongBookEntry::getQuestionId).collect(Collectors.toSet());
+        List<Long> ids = new ArrayList<>(releasedWrongQuestionIds(loginUser.getUserId(), candidateIds));
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("ids", ids);
         return result;
+    }
+
+    private Set<Long> releasedWrongQuestionIds(Long studentId, Set<Long> candidateIds) {
+        if (candidateIds == null || candidateIds.isEmpty()) return Set.of();
+        List<ExamRecord> records = examRecordMapper.selectList(new LambdaQueryWrapper<ExamRecord>()
+                .eq(ExamRecord::getStudentId, studentId)
+                .eq(ExamRecord::getStatus, "graded")
+                .select(ExamRecord::getId, ExamRecord::getExamId));
+        if (records.isEmpty()) return Set.of();
+        Set<Long> examIds = records.stream().map(ExamRecord::getExamId).collect(Collectors.toSet());
+        Map<Long, Exam> exams = examMapper.selectBatchIds(examIds).stream()
+                .collect(Collectors.toMap(Exam::getId, e -> e));
+        List<Long> releasedRecordIds = records.stream()
+                .filter(r -> canRevealAnswerKey(exams.get(r.getExamId())))
+                .map(ExamRecord::getId).collect(Collectors.toList());
+        if (releasedRecordIds.isEmpty()) return Set.of();
+        return answerMapper.selectList(new LambdaQueryWrapper<Answer>()
+                        .in(Answer::getRecordId, releasedRecordIds)
+                        .in(Answer::getQuestionId, candidateIds)
+                        .eq(Answer::getIsCorrect, "N")
+                        .select(Answer::getQuestionId))
+                .stream().map(Answer::getQuestionId).collect(Collectors.toSet());
     }
 
     @PostMapping("/wrong-book/{questionId}")
@@ -179,6 +223,8 @@ public class StudentController {
                                                 @AuthenticationPrincipal LoginUser loginUser) {
         if (!"student".equals(loginUser.getRole())) throw AppException.forbidden("仅学生可访问");
         if (questionMapper.selectById(questionId) == null) throw AppException.notFound("题目不存在");
+        if (!hasIncorrectAnswer(loginUser.getUserId(), questionId))
+            throw AppException.badRequest("只能收藏自己答错过的题目");
         long exists = wrongBookMapper.selectCount(new LambdaQueryWrapper<WrongBookEntry>()
                 .eq(WrongBookEntry::getStudentId, loginUser.getUserId())
                 .eq(WrongBookEntry::getQuestionId, questionId));
@@ -188,6 +234,33 @@ public class StudentController {
             wrongBookMapper.insert(wb);
         }
         return Map.of("ok", true);
+    }
+
+    private boolean hasIncorrectAnswer(Long studentId, Long questionId) {
+        List<ExamRecord> records = examRecordMapper.selectList(new LambdaQueryWrapper<ExamRecord>()
+                        .eq(ExamRecord::getStudentId, studentId)
+                        .eq(ExamRecord::getStatus, "graded")
+                        .select(ExamRecord::getId, ExamRecord::getExamId));
+        if (records.isEmpty()) return false;
+        Set<Long> examIds = records.stream().map(ExamRecord::getExamId).collect(Collectors.toSet());
+        Map<Long, Exam> exams = examMapper.selectBatchIds(examIds).stream()
+                .collect(Collectors.toMap(Exam::getId, e -> e));
+        List<Long> recordIds = records.stream()
+                .filter(r -> canRevealAnswerKey(exams.get(r.getExamId())))
+                .map(ExamRecord::getId).collect(Collectors.toList());
+        if (recordIds.isEmpty()) return false;
+        return answerMapper.selectCount(new LambdaQueryWrapper<Answer>()
+                .in(Answer::getRecordId, recordIds)
+                .eq(Answer::getQuestionId, questionId)
+                .eq(Answer::getIsCorrect, "N")) > 0;
+    }
+
+    private boolean canRevealAnswerKey(Exam exam) {
+        if (exam == null) return false;
+        return Boolean.TRUE.equals(exam.getScorePublic())
+                && ("closed".equals(exam.getStatus())
+                || (exam.getCloseTime() != null
+                && !LocalDateTime.now(APP_ZONE).isBefore(exam.getCloseTime())));
     }
 
     @DeleteMapping("/wrong-book/{questionId}")

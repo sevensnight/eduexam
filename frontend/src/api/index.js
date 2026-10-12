@@ -39,6 +39,7 @@ export const examApi = {
   update: (id, data) => request.put(`/exams/${id}`, data),
   remove: (id) => request.delete(`/exams/${id}`),
   start: (id) => request.post(`/exams/${id}/start`),
+  saveDraft: (id, data) => request.put(`/exams/${id}/draft`, data, { suppressError: true }),
   submit: (id, data) => request.post(`/exams/${id}/submit`, data),
   leaderboard: (id) => request.get(`/exams/${id}/leaderboard`),
   myRecord: (id) => request.get(`/exams/${id}/my-record`),

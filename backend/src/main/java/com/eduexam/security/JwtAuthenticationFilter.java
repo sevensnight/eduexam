@@ -33,7 +33,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             try {
                 Long userId = jwtUtil.getUserIdFromToken(token);
                 User user = userMapper.selectById(userId);
-                if (user != null && user.getIsActive()) {
+                if (user != null && Boolean.TRUE.equals(user.getIsActive())) {
                     LoginUser loginUser = new LoginUser(user);
                     UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(
                             loginUser, null,
