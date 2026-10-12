@@ -11,7 +11,7 @@
         <el-input v-model="form.email" placeholder="输入邮箱地址" autocomplete="email" />
       </el-form-item>
       <el-form-item prop="password" label="密码">
-        <el-input v-model="form.password" type="password" placeholder="至少 6 位" autocomplete="new-password" show-password />
+        <el-input v-model="form.password" type="password" maxlength="72" placeholder="8-72 位，至少包含一个字母和一个数字" autocomplete="new-password" show-password />
       </el-form-item>
       <el-button native-type="submit" type="primary" :loading="loading" class="auth-submit">注册</el-button>
       <p class="auth-switch">已有账号？<router-link to="/login">返回登录</router-link></p>
@@ -39,10 +39,20 @@ const form = ref({
   real_name: '',
 })
 
+function validatePasswordBytes(_, value, callback) {
+  if (value && new TextEncoder().encode(value).length > 72) callback(new Error('密码的 UTF-8 编码不能超过 72 字节'))
+  else callback()
+}
+
 const rules = {
   username: [{ required: true, min: 4, max: 20, message: '用户名长度需为 4-20 位' }],
   email: [{ required: true, type: 'email', message: '请输入有效邮箱' }],
-  password: [{ required: true, min: 6, message: '密码至少 6 位' }],
+  password: [
+    { required: true, message: '请输入密码' },
+    { min: 8, max: 72, message: '密码长度需为 8-72 位' },
+    { validator: validatePasswordBytes },
+    { pattern: /^(?=.*\p{L})(?=.*\d).+$/u, message: '密码至少包含一个字母和一个数字' },
+  ],
 }
 
 async function submit() {

@@ -17,7 +17,16 @@
       </div>
     </template>
 
-    <el-tabs v-model="activeTab">
+    <el-result
+      v-if="!loading && loadError"
+      icon="error"
+      title="统计数据加载失败"
+      sub-title="请检查网络或后端服务后重试"
+    >
+      <template #extra><el-button type="primary" @click="refreshStats">重新加载</el-button></template>
+    </el-result>
+
+    <el-tabs v-else v-model="activeTab">
       <el-tab-pane label="总览" name="overview">
         <template v-if="summary">
           <el-row :gutter="16" style="margin-bottom: 20px">
@@ -115,6 +124,13 @@
       </el-tab-pane>
 
       <el-tab-pane label="学生对比" name="students">
+        <el-alert
+          v-if="insights?.student_comparison_truncated"
+          type="info"
+          :closable="false"
+          :title="`共有 ${insights.student_comparison_total} 名学生，当前展示成绩最高的前 1000 名`"
+          style="margin-bottom:12px"
+        />
         <el-table :data="insights?.student_comparison || []" border stripe>
           <el-table-column prop="rank" label="排名" width="80" />
           <el-table-column prop="username" label="用户名" width="130" />
@@ -181,11 +197,12 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { Download, Upload } from '@element-plus/icons-vue'
+import { Download, Upload, WarningFilled } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 
 import { examApi, statsApi } from '@/api'
 import { createUploadForm, downloadBlob } from '@/utils/download'
+import { formatAppDateTime } from '@/utils/examTime'
 
 const route = useRoute()
 const examId = route.params.id
@@ -194,6 +211,7 @@ const activeTab = ref('overview')
 const exam = ref(null)
 const summary = ref(null)
 const insights = ref(null)
+const loadError = ref(false)
 
 const statCards = computed(() => [
   { label: '参与人数', value: summary.value?.total_participants ?? '-' },
@@ -209,34 +227,48 @@ function typeLabel(type) {
 }
 
 function formatTime(value) {
-  return value ? new Date(value).toLocaleString() : '-'
+  return formatAppDateTime(value)
 }
 
 const sheetVisible = ref(false)
 const sheetLoading = ref(false)
 const sheetStudent = ref('')
 const sheetRecord = ref(null)
-let cachedRecords = null
+let sheetRequestId = 0
 
 async function openAnswerSheet(row) {
+  const requestId = ++sheetRequestId
   sheetStudent.value = row.real_name || row.username
   sheetRecord.value = null
   sheetVisible.value = true
   sheetLoading.value = true
   try {
-    if (!cachedRecords) {
-      cachedRecords = await examApi.records(examId)
+    const detail = await examApi.record(examId, row.record_id)
+    if (requestId !== sheetRequestId || !sheetVisible.value) return
+    sheetRecord.value = {
+      ...detail,
+      answers: (detail.questions || []).map((question) => ({
+        id: question.answer_id,
+        question_id: question.question_id,
+        question_title: question.title,
+        question_type: question.question_type,
+        user_answer: question.user_answer,
+        correct_answer: question.answer,
+        is_correct: question.is_correct,
+        score_got: question.score_got,
+        max_score: question.score,
+      })),
     }
-    sheetRecord.value = cachedRecords.find((r) => r.student_id === row.student_id) ?? null
   } finally {
-    sheetLoading.value = false
+    if (requestId === sheetRequestId) sheetLoading.value = false
   }
 }
 async function loadStats() {
+  loadError.value = false
   const [examInfo, statInfo, insightInfo] = await Promise.all([
-    examApi.get(examId).catch(() => null),
-    statsApi.exam(examId).catch(() => null),
-    statsApi.insights(examId).catch(() => null),
+    examApi.get(examId),
+    statsApi.exam(examId),
+    statsApi.insights(examId),
   ])
   exam.value = examInfo
   summary.value = statInfo
@@ -265,13 +297,18 @@ async function uploadGrades(options) {
   }
 }
 
-onMounted(async () => {
+async function refreshStats() {
+  loading.value = true
   try {
     await loadStats()
+  } catch {
+    loadError.value = true
   } finally {
     loading.value = false
   }
-})
+}
+
+onMounted(refreshStats)
 </script>
 
 <style scoped>

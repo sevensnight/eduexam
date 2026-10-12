@@ -17,14 +17,32 @@ request.interceptors.request.use((config) => {
 
 request.interceptors.response.use(
   (res) => res.data,
-  (err) => {
-    const msg = err.response?.data?.detail || err.message || '请求失败'
+  async (err) => {
+    let responseData = err.response?.data
+    if (typeof Blob !== 'undefined' && responseData instanceof Blob) {
+      try {
+        const raw = await responseData.text()
+        try {
+          responseData = raw ? JSON.parse(raw) : null
+        } catch {
+          responseData = raw || null
+        }
+      } catch {
+        responseData = null
+      }
+    }
+    const msg = responseData?.detail || responseData?.message
+      || (typeof responseData === 'string' ? responseData : null)
+      || err.message
+      || '请求失败'
     if (!err.config?.suppressError) {
       ElMessage.error(typeof msg === 'string' ? msg : JSON.stringify(msg))
     }
-    if (err.response?.status === 401) {
+    const requestUrl = err.config?.url || ''
+    const isPublicAuthRequest = /^\/auth\/(login|register)(?:$|\?)/.test(requestUrl)
+    if (err.response?.status === 401 && !isPublicAuthRequest) {
       clearStoredAuth()
-      window.location.href = '/login'
+      if (window.location.pathname !== '/login') window.location.assign('/login')
     }
     return Promise.reject(err)
   }

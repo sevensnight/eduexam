@@ -30,7 +30,7 @@
               <el-empty v-if="!notifications.length && !notifLoading" description="暂无通知" :image-size="60" />
               <article v-for="n in notifications" :key="n.id" class="notification-item">
                 <p>{{ n.content }}</p>
-                <time>{{ new Date(n.created_at).toLocaleString() }}</time>
+                <time>{{ formatAppDateTime(n.created_at) }}</time>
               </article>
             </div>
           </el-popover>
@@ -74,6 +74,8 @@ import { useUserStore } from '@/stores/user'
 import { notificationApi } from '@/api'
 import AppNavigation from '@/components/AppNavigation.vue'
 import { getPageInfo } from '@/utils/pageInfo'
+import { formatAppDateTime } from '@/utils/examTime'
+import { ArrowDown, Bell, Menu, Reading, Setting } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const router = useRouter()

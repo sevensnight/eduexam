@@ -73,12 +73,34 @@ if /I not "%EDUEXAM_DB_NAME%"=="eduexam" (
     exit /b 1
 )
 
-echo [Database] Checking schema from "%PROJECT_DIR%sql"...
-"%MYSQL_EXE%" %MYSQL_COMMON% --default-character-set=utf8mb4 < "%SCHEMA_SQL%"
+echo [Database] Ensuring database exists...
+"%MYSQL_EXE%" %MYSQL_COMMON% --default-character-set=utf8mb4 -e "CREATE DATABASE IF NOT EXISTS eduexam DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
 if errorlevel 1 (
-    echo [ERROR] Unable to initialize the database.
+    echo [ERROR] Unable to create or inspect the database.
     echo Check that MySQL is running and the password matches .eduexam.local.bat or your environment variable.
     exit /b 1
+)
+
+set "TABLE_FILE=%TEMP%\eduexam_table_count_%RANDOM%_%RANDOM%.txt"
+"%MYSQL_EXE%" %MYSQL_COMMON% --default-character-set=utf8mb4 -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='eduexam' AND table_name IN ('users','categories','tags','questions','question_tags','courses','course_enrollments','exams','exam_questions','exam_records','answers','wrong_book','notifications');" > "%TABLE_FILE%"
+if errorlevel 1 (
+    if exist "%TABLE_FILE%" del /q "%TABLE_FILE%"
+    echo [ERROR] Unable to inspect the eduexam database.
+    exit /b 1
+)
+set "REQUIRED_TABLE_COUNT=0"
+set /p REQUIRED_TABLE_COUNT=<"%TABLE_FILE%"
+del /q "%TABLE_FILE%"
+
+if not "%REQUIRED_TABLE_COUNT%"=="13" (
+    echo [Database] New or incomplete database detected. Applying the idempotent initial schema from "%PROJECT_DIR%sql"...
+    "%MYSQL_EXE%" %MYSQL_COMMON% --default-character-set=utf8mb4 < "%SCHEMA_SQL%"
+    if errorlevel 1 (
+        echo [ERROR] Unable to initialize the database.
+        exit /b 1
+    )
+) else (
+    echo [Database] Existing schema detected. Versioned upgrades will be applied by Flyway.
 )
 
 set "COUNT_FILE=%TEMP%\eduexam_user_count_%RANDOM%_%RANDOM%.txt"
@@ -110,18 +132,6 @@ if "%USER_COUNT%"=="0" (
     echo [Database] Ready. Found %USER_COUNT% users; seed import skipped.
 )
 
-echo [Database] Normalizing legacy exam record statuses...
-"%MYSQL_EXE%" %MYSQL_COMMON% --default-character-set=utf8mb4 -e "UPDATE eduexam.exam_records SET status='graded' WHERE status='completed'; UPDATE eduexam.exam_records SET status='in_progress' WHERE status='started';"
-if errorlevel 1 (
-    echo [ERROR] Unable to normalize legacy exam record statuses.
-    exit /b 1
-)
-
-echo [Database] Enforcing one answer per question and exam record...
-"%MYSQL_EXE%" %MYSQL_COMMON% --default-character-set=utf8mb4 -e "USE eduexam; DELETE a FROM answers a INNER JOIN answers a2 ON a2.record_id=a.record_id AND a2.question_id=a.question_id AND a2.id<a.id; SET @has_answer_unique := (SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema='eduexam' AND table_name='answers' AND index_name='uq_answer_record_question'); SET @add_answer_unique := IF(@has_answer_unique=0, 'ALTER TABLE answers ADD UNIQUE KEY uq_answer_record_question (record_id, question_id)', 'SET @answer_index_noop=1'); PREPARE answer_index_stmt FROM @add_answer_unique; EXECUTE answer_index_stmt; DEALLOCATE PREPARE answer_index_stmt;"
-if errorlevel 1 (
-    echo [ERROR] Unable to enforce answer uniqueness.
-    exit /b 1
-)
+echo [Database] Bootstrap complete. Flyway will validate and apply pending migrations when the backend starts.
 
 exit /b 0

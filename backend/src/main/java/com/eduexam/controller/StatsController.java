@@ -3,8 +3,11 @@ package com.eduexam.controller;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.eduexam.common.AppException;
 import com.eduexam.domain.*;
+import com.eduexam.dto.QuestionAnswerStatRow;
+import com.eduexam.dto.QuestionTagRow;
 import com.eduexam.mapper.*;
 import com.eduexam.security.LoginUser;
+import com.eduexam.security.RolePolicy;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
@@ -20,6 +23,9 @@ import java.util.stream.Collectors;
 public class StatsController {
 
     private static final ZoneId APP_ZONE = ZoneId.of("Asia/Shanghai");
+    private static final int MAX_STATS_PARTICIPANTS = 10_000;
+    private static final long MAX_INSIGHT_ANSWER_CELLS = 500_000;
+    private static final int MAX_STUDENT_COMPARISON_ROWS = 1_000;
 
     private final ExamMapper examMapper;
     private final ExamQuestionMapper examQuestionMapper;
@@ -29,18 +35,37 @@ public class StatsController {
     private final CategoryMapper categoryMapper;
     private final UserMapper userMapper;
     private final QuestionTagMapper questionTagMapper;
-    private final TagMapper tagMapper;
     private final CourseEnrollmentMapper enrollmentMapper;
 
     private boolean canStudentAccessExam(Exam exam, Long studentId) {
         User student = userMapper.selectById(studentId);
         if (student == null || !Boolean.TRUE.equals(student.getIsActive())) return false;
         if (exam.getTargetClass() != null && !exam.getTargetClass().isBlank()
-                && !exam.getTargetClass().equals(student.getClassName())) return false;
+                && userMapper.selectCount(new LambdaQueryWrapper<User>()
+                        .eq(User::getId, studentId)
+                        .apply("TRIM(class_name) = {0}", exam.getTargetClass().strip())) == 0) return false;
         return exam.getCourseId() == null || enrollmentMapper.selectCount(
                 new LambdaQueryWrapper<CourseEnrollment>()
                         .eq(CourseEnrollment::getCourseId, exam.getCourseId())
                         .eq(CourseEnrollment::getStudentId, studentId)) > 0;
+    }
+
+    private boolean canStudentAccessOrParticipated(Exam exam, Long studentId) {
+        return canStudentAccessExam(exam, studentId) || examRecordMapper.selectCount(
+                new LambdaQueryWrapper<ExamRecord>()
+                        .eq(ExamRecord::getExamId, exam.getId())
+                        .eq(ExamRecord::getStudentId, studentId)) > 0;
+    }
+
+    /** Select one official result per student: highest graded score, then earliest submission. */
+    private List<ExamRecord> bestGradedAttempts(Long examId) {
+        List<ExamRecord> records = examRecordMapper.findBestGradedAttempts(
+                examId, MAX_STATS_PARTICIPANTS + 1);
+        if (records.size() > MAX_STATS_PARTICIPANTS) {
+            throw AppException.payloadTooLarge(
+                    "单场考试统计最多处理 " + MAX_STATS_PARTICIPANTS + " 名学生，请归档或拆分考试");
+        }
+        return records;
     }
 
     private boolean isStatsReleased(Exam exam) {
@@ -77,19 +102,19 @@ public class StatsController {
     public Map<String, Object> examStats(@AuthenticationPrincipal LoginUser loginUser) {
         if (!"admin".equals(loginUser.getRole()) && !"teacher".equals(loginUser.getRole()))
             throw AppException.forbidden("无权访问");
-        LambdaQueryWrapper<Exam> examWrapper = new LambdaQueryWrapper<>();
-        if ("teacher".equals(loginUser.getRole())) examWrapper.eq(Exam::getTeacherId, loginUser.getUserId());
-        List<Exam> exams = examMapper.selectList(examWrapper);
-        long total = exams.size();
-        long published = exams.stream().filter(e -> "published".equals(e.getStatus())).count();
-        long closed = exams.stream().filter(e -> "closed".equals(e.getStatus())).count();
-        long draft = exams.stream().filter(e -> "draft".equals(e.getStatus())).count();
-        List<Long> examIds = exams.stream().map(Exam::getId).collect(Collectors.toList());
-        long totalRecords = examIds.isEmpty() ? 0 :
-                examRecordMapper.selectCount(new LambdaQueryWrapper<ExamRecord>().in(ExamRecord::getExamId, examIds));
-        long gradedRecords = examIds.isEmpty() ? 0 :
-                examRecordMapper.selectCount(new LambdaQueryWrapper<ExamRecord>().in(ExamRecord::getExamId, examIds)
-                        .eq(ExamRecord::getStatus, "graded"));
+        Long teacherId = "teacher".equals(loginUser.getRole()) ? loginUser.getUserId() : null;
+        java.util.function.Function<String, LambdaQueryWrapper<Exam>> examsWithStatus = status -> {
+            LambdaQueryWrapper<Exam> query = new LambdaQueryWrapper<>();
+            if (teacherId != null) query.eq(Exam::getTeacherId, teacherId);
+            if (status != null) query.eq(Exam::getStatus, status);
+            return query;
+        };
+        long total = examMapper.selectCount(examsWithStatus.apply(null));
+        long published = examMapper.selectCount(examsWithStatus.apply("published"));
+        long closed = examMapper.selectCount(examsWithStatus.apply("closed"));
+        long draft = examMapper.selectCount(examsWithStatus.apply("draft"));
+        long totalRecords = examRecordMapper.countForExamOwner(teacherId, null);
+        long gradedRecords = examRecordMapper.countForExamOwner(teacherId, "graded");
         return Map.of("total_exams", total, "published", published, "closed", closed, "draft", draft,
                 "total_records", totalRecords, "graded_records", gradedRecords);
     }
@@ -97,10 +122,12 @@ public class StatsController {
     @GetMapping("/exam/{examId}")
     public Map<String, Object> examSummary(@PathVariable Long examId,
                                             @AuthenticationPrincipal LoginUser loginUser) {
+        if (!RolePolicy.isSupported(loginUser.getRole())) throw AppException.forbidden("账号角色无效");
         Exam exam = examMapper.selectById(examId);
         if (exam == null) throw AppException.notFound("考试不存在");
         if ("student".equals(loginUser.getRole())) {
-            if (!Boolean.TRUE.equals(exam.getScorePublic()) || !canStudentAccessExam(exam, loginUser.getUserId()))
+            if (!Boolean.TRUE.equals(exam.getScorePublic())
+                    || !canStudentAccessOrParticipated(exam, loginUser.getUserId()))
                 throw AppException.forbidden("无权查看该考试统计");
             if (!isStatsReleased(exam))
                 throw AppException.forbidden("考试统计尚未开放");
@@ -108,12 +135,13 @@ public class StatsController {
         if ("teacher".equals(loginUser.getRole()) && !loginUser.getUserId().equals(exam.getTeacherId()))
             throw AppException.forbidden("无权访问");
 
-        List<ExamRecord> records = examRecordMapper.selectList(
-                new LambdaQueryWrapper<ExamRecord>().eq(ExamRecord::getExamId, examId)
-                        .in(ExamRecord::getStatus, "graded", "submitted"));
+        long totalAttempts = examRecordMapper.selectCount(new LambdaQueryWrapper<ExamRecord>()
+                .eq(ExamRecord::getExamId, examId).eq(ExamRecord::getStatus, "graded"));
+        List<ExamRecord> records = bestGradedAttempts(examId);
 
         Map<String, Object> empty = new LinkedHashMap<>();
         empty.put("total_participants", 0); empty.put("avg_score", 0);
+        empty.put("unique_participants", 0); empty.put("total_attempts", totalAttempts);
         empty.put("pass_rate", 0.0); empty.put("good_rate", 0.0);
         empty.put("excellent_rate", 0.0); empty.put("max_score", 0);
         empty.put("score_distribution", buildEmptyDistribution());
@@ -135,6 +163,8 @@ public class StatsController {
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("total_participants", total);
+        result.put("unique_participants", total);
+        result.put("total_attempts", totalAttempts);
         result.put("avg_score", Math.round(avg * 10) / 10.0);
         result.put("pass_rate", total > 0 ? Math.round((double) passCount / total * 1000) / 1000.0 : 0.0);
         result.put("good_rate", total > 0 ? Math.round((double) goodCount / total * 1000) / 1000.0 : 0.0);
@@ -147,10 +177,12 @@ public class StatsController {
     @GetMapping("/exam/{examId}/category-distribution")
     public List<Map<String, Object>> examCategoryDist(@PathVariable Long examId,
                                                        @AuthenticationPrincipal LoginUser loginUser) {
+        if (!RolePolicy.isSupported(loginUser.getRole())) throw AppException.forbidden("账号角色无效");
         Exam exam = examMapper.selectById(examId);
         if (exam == null) throw AppException.notFound("考试不存在");
         if ("student".equals(loginUser.getRole())) {
-            if (!Boolean.TRUE.equals(exam.getScorePublic()) || !canStudentAccessExam(exam, loginUser.getUserId()))
+            if (!Boolean.TRUE.equals(exam.getScorePublic())
+                    || !canStudentAccessOrParticipated(exam, loginUser.getUserId()))
                 throw AppException.forbidden("无权查看该考试统计");
             if (!isStatsReleased(exam))
                 throw AppException.forbidden("考试统计尚未开放");
@@ -182,6 +214,7 @@ public class StatsController {
     @GetMapping("/exam/{examId}/insights")
     public Map<String, Object> examInsights(@PathVariable Long examId,
                                              @AuthenticationPrincipal LoginUser loginUser) {
+        if (!RolePolicy.isSupported(loginUser.getRole())) throw AppException.forbidden("账号角色无效");
         if ("student".equals(loginUser.getRole())) throw AppException.forbidden("无权访问");
         Exam exam = examMapper.selectById(examId);
         if (exam == null) throw AppException.notFound("考试不存在");
@@ -191,55 +224,54 @@ public class StatsController {
         List<ExamQuestion> examQs = examQuestionMapper.selectList(
                 new LambdaQueryWrapper<ExamQuestion>().eq(ExamQuestion::getExamId, examId)
                         .orderByAsc(ExamQuestion::getOrderNum));
-        List<ExamRecord> records = examRecordMapper.selectList(
-                new LambdaQueryWrapper<ExamRecord>().eq(ExamRecord::getExamId, examId)
-                        .in(ExamRecord::getStatus, "graded", "submitted"));
+        List<ExamRecord> records = bestGradedAttempts(examId);
 
         Map<String, Object> empty = new LinkedHashMap<>();
         empty.put("weak_points", List.of()); empty.put("question_accuracy", List.of());
         empty.put("class_comparison", List.of()); empty.put("student_comparison", List.of());
+        empty.put("student_comparison_total", 0);
+        empty.put("student_comparison_truncated", false);
         if (records.isEmpty()) return empty;
+        if ((long) records.size() * examQs.size() > MAX_INSIGHT_ANSWER_CELLS) {
+            throw AppException.payloadTooLarge(
+                    "统计所需答题单元格超过 " + MAX_INSIGHT_ANSWER_CELLS + "，请拆分考试后重试");
+        }
 
         List<Long> recordIds = records.stream().map(ExamRecord::getId).collect(Collectors.toList());
-        List<Answer> allAnswers = answerMapper.selectList(
-                new LambdaQueryWrapper<Answer>().in(Answer::getRecordId, recordIds));
-        Map<Long, List<Answer>> answersByQuestion = allAnswers.stream()
-                .collect(Collectors.groupingBy(Answer::getQuestionId));
+        Map<Long, QuestionAnswerStatRow> statsByQuestion = answerMapper
+                .aggregateQuestionStats(recordIds).stream()
+                .collect(Collectors.toMap(QuestionAnswerStatRow::getQuestionId, row -> row));
 
         Set<Long> questionIds = examQs.stream().map(ExamQuestion::getQuestionId).collect(Collectors.toSet());
         Map<Long, Question> questionMap = questionIds.isEmpty() ? Map.of() :
                 questionMapper.selectBatchIds(new ArrayList<>(questionIds)).stream()
                         .collect(Collectors.toMap(Question::getId, q -> q));
 
-        List<Category> allCats = categoryMapper.selectList(null);
-        Map<Long, String> catNames = allCats.stream().collect(Collectors.toMap(Category::getId, Category::getName));
+        Set<Long> categoryIds = questionMap.values().stream().map(Question::getCategoryId)
+                .filter(Objects::nonNull).collect(Collectors.toSet());
+        Map<Long, String> catNames = categoryIds.isEmpty() ? Map.of() :
+                categoryMapper.selectBatchIds(categoryIds).stream()
+                        .collect(Collectors.toMap(Category::getId, Category::getName));
 
         // Load tags per question
-        Set<Long> allTagIds = new HashSet<>();
-        Map<Long, List<Long>> tagIdsByQuestion = new HashMap<>();
-        for (Long qid : questionIds) {
-            List<Long> tids = questionTagMapper.findTagIdsByQuestionId(qid);
-            tagIdsByQuestion.put(qid, tids);
-            allTagIds.addAll(tids);
-        }
-        Map<Long, String> tagNameMap = new HashMap<>();
-        if (!allTagIds.isEmpty()) {
-            tagMapper.selectBatchIds(new ArrayList<>(allTagIds)).forEach(t -> tagNameMap.put(t.getId(), t.getName()));
-        }
         Map<Long, List<String>> tagsByQuestion = new HashMap<>();
-        tagIdsByQuestion.forEach((qid, tids) ->
-                tagsByQuestion.put(qid, tids.stream()
-                        .map(tid -> tagNameMap.getOrDefault(tid, ""))
-                        .filter(s -> !s.isEmpty()).collect(Collectors.toList())));
+        if (!questionIds.isEmpty()) {
+            for (QuestionTagRow row : questionTagMapper.findTagsByQuestionIds(questionIds)) {
+                tagsByQuestion.computeIfAbsent(row.getQuestionId(), ignored -> new ArrayList<>())
+                        .add(row.getName());
+            }
+        }
 
         // question_accuracy
         List<Map<String, Object>> questionAccuracy = examQs.stream().map(eq -> {
             Question q = questionMap.get(eq.getQuestionId());
-            List<Answer> qAnswers = answersByQuestion.getOrDefault(eq.getQuestionId(), List.of());
-            long answerCount = qAnswers.size();
-            long correctCount = qAnswers.stream().filter(a -> "Y".equals(a.getIsCorrect())).count();
-            double avgScoreVal = qAnswers.isEmpty() ? 0 : qAnswers.stream()
-                    .mapToDouble(a -> a.getScoreGot() != null ? a.getScoreGot() : 0).average().orElse(0);
+            QuestionAnswerStatRow answerStats = statsByQuestion.get(eq.getQuestionId());
+            long answerCount = answerStats != null && answerStats.getAnswerCount() != null
+                    ? answerStats.getAnswerCount() : 0;
+            long correctCount = answerStats != null && answerStats.getCorrectCount() != null
+                    ? answerStats.getCorrectCount() : 0;
+            double avgScoreVal = answerStats != null && answerStats.getAverageScore() != null
+                    ? answerStats.getAverageScore() : 0;
             double accuracyRate = answerCount > 0 ? (double) correctCount / answerCount : 0;
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("question_id", eq.getQuestionId());
@@ -259,9 +291,12 @@ public class StatsController {
         for (ExamQuestion eq : examQs) {
             Question q = questionMap.get(eq.getQuestionId());
             if (q == null || q.getCategoryId() == null) continue;
-            List<Answer> qAnswers = answersByQuestion.getOrDefault(eq.getQuestionId(), List.of());
-            if (qAnswers.isEmpty()) continue;
-            double rate = qAnswers.stream().filter(a -> "Y".equals(a.getIsCorrect())).count() / (double) qAnswers.size();
+            QuestionAnswerStatRow answerStats = statsByQuestion.get(eq.getQuestionId());
+            if (answerStats == null || answerStats.getAnswerCount() == null
+                    || answerStats.getAnswerCount() == 0) continue;
+            double maxScore = eq.getScore() != null && eq.getScore() > 0 ? eq.getScore() : 1.0;
+            double averageScore = answerStats.getAverageScore() != null ? answerStats.getAverageScore() : 0;
+            double rate = Math.max(0, Math.min(averageScore / maxScore, 1));
             scoreRatesByCat.computeIfAbsent(q.getCategoryId(), k -> new ArrayList<>()).add(rate);
         }
         List<Map<String, Object>> weakPoints = scoreRatesByCat.entrySet().stream().map(e -> {
@@ -312,7 +347,7 @@ public class StatsController {
                 .sorted(Comparator.comparingDouble(ExamRecord::getTotalScore).reversed())
                 .collect(Collectors.toList());
         List<Map<String, Object>> studentComparison = new ArrayList<>();
-        for (int i = 0; i < sorted.size(); i++) {
+        for (int i = 0; i < Math.min(sorted.size(), MAX_STUDENT_COMPARISON_ROWS); i++) {
             ExamRecord r = sorted.get(i);
             User s = studentMap.get(r.getStudentId());
             Map<String, Object> m = new LinkedHashMap<>();
@@ -332,6 +367,8 @@ public class StatsController {
         result.put("question_accuracy", questionAccuracy);
         result.put("class_comparison", classComparison);
         result.put("student_comparison", studentComparison);
+        result.put("student_comparison_total", sorted.size());
+        result.put("student_comparison_truncated", sorted.size() > MAX_STUDENT_COMPARISON_ROWS);
         return result;
     }
 

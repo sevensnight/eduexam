@@ -1,6 +1,12 @@
 <template>
   <div v-loading="loading">
-    <el-result v-if="!loading && !record" icon="info" title="暂无考试记录" sub-title="您还未参加该考试">
+    <el-result v-if="!loading && loadError" icon="error" title="考试结果加载失败" sub-title="请检查网络或后端服务后重试">
+      <template #extra>
+        <el-button type="primary" @click="load">重新加载</el-button>
+      </template>
+    </el-result>
+
+    <el-result v-else-if="!loading && !record" icon="info" title="暂无考试记录" sub-title="您还未参加该考试">
       <template #extra>
         <el-button type="primary" @click="$router.push(`/exams/${examId}/take`)">参加考试</el-button>
       </template>
@@ -30,7 +36,7 @@
             </el-tag>
           </el-descriptions-item>
           <el-descriptions-item label="提交时间">
-            {{ record.submitted_at ? new Date(record.submitted_at).toLocaleString() : '-' }}
+            {{ formatAppDateTime(record.submitted_at) }}
           </el-descriptions-item>
         </el-descriptions>
       </el-card>
@@ -90,14 +96,17 @@ import { ElMessage } from 'element-plus'
 
 import { examApi, studentApi } from '@/api'
 import { useUserStore } from '@/stores/user'
+import { formatAppDateTime } from '@/utils/examTime'
 
 const route = useRoute()
 const store = useUserStore()
 const examId = computed(() => route.params.id)
+const requestedRecordId = computed(() => route.query.recordId)
 const loading = ref(true)
 const exam = ref(null)
 const record = ref(null)
 const wrongBookIds = ref(new Set())
+const loadError = ref(false)
 
 const resultStatus = computed(() => {
   if (record.value?.status === 'in_progress') return { type: 'primary', text: '进行中' }
@@ -115,21 +124,21 @@ function typeLabel(type) {
 }
 
 const answerRows = computed(() => {
-  if (!record.value?.answers) return []
-  return record.value.answers.map((answer) => ({
+  const answers = record.value?.answers || record.value?.questions
+  if (!answers) return []
+  return answers.map((answer) => ({
     ...answer,
-    title: answer.question_title || `题目#${answer.question_id}`,
+    title: answer.question_title || answer.title || `题目#${answer.question_id}`,
     type: answer.question_type || '',
-    max_score: answer.max_score ?? '-',
-    correct_answer: answer.correct_answer ?? null,
+    max_score: answer.max_score ?? answer.score ?? '-',
+    correct_answer: answer.correct_answer ?? answer.answer ?? null,
     explanation: answer.explanation || '',
   }))
 })
 
 const objectiveScore = computed(() => {
-  if (!record.value?.answers) return 0
-  return record.value.answers
-    .filter((answer) => answer.question_type !== 'essay')
+  return answerRows.value
+    .filter((answer) => answer.type !== 'essay')
     .reduce((sum, answer) => sum + (answer.score_got ?? 0), 0)
 })
 
@@ -146,18 +155,30 @@ async function toggleWrong(questionId) {
   wrongBookIds.value = new Set(wrongBookIds.value)
 }
 
-onMounted(async () => {
+async function load() {
+  loading.value = true
+  loadError.value = false
   try {
-    exam.value = await examApi.get(examId.value).catch(() => null)
-    const response = await examApi.myRecord(examId.value).catch(() => null)
-    record.value = response?.exists ? response : null
+    const recordRequest = requestedRecordId.value
+      ? examApi.record(examId.value, requestedRecordId.value)
+      : examApi.myRecord(examId.value)
+    const [examInfo, response] = await Promise.all([
+      examApi.get(examId.value),
+      recordRequest,
+    ])
+    exam.value = examInfo
+    record.value = requestedRecordId.value ? response : (response?.exists ? response : null)
 
     if (store.isStudent && record.value?.result_released) {
       const response = await studentApi.wrongBookIds().catch(() => ({ ids: [] }))
       wrongBookIds.value = new Set(response.ids || [])
     }
+  } catch {
+    loadError.value = true
   } finally {
     loading.value = false
   }
-})
+}
+
+onMounted(load)
 </script>

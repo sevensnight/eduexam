@@ -13,7 +13,7 @@
       <el-table-column prop="student_count" label="选课人数" width="100" align="center" />
       <el-table-column prop="description" label="说明" min-width="220" show-overflow-tooltip />
       <el-table-column label="创建时间" width="170">
-        <template #default="{ row }">{{ row.created_at ? new Date(row.created_at).toLocaleString() : '-' }}</template>
+        <template #default="{ row }">{{ formatAppDateTime(row.created_at) }}</template>
       </el-table-column>
       <el-table-column label="操作" width="210" fixed="right">
         <template #default="{ row }">
@@ -40,6 +40,17 @@
         </el-form-item>
         <el-form-item label="课程说明">
           <el-input v-model="form.description" type="textarea" :rows="3" placeholder="课程简介、适用班级等" />
+        </el-form-item>
+        <el-form-item v-if="store.isAdmin" label="授课教师" required>
+          <el-select v-model="form.teacher_id" filterable placeholder="请选择有效教师" style="width:100%">
+            <el-option
+              v-for="teacher in teachers"
+              :key="teacher.id"
+              :label="`${teacher.real_name || teacher.username}（${teacher.username}）`"
+              :value="teacher.id"
+              :disabled="!teacher.is_active"
+            />
+          </el-select>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -94,13 +105,17 @@ import { nextTick, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 
-import { courseApi } from '@/api'
+import { courseApi, userApi } from '@/api'
+import { useUserStore } from '@/stores/user'
+import { formatAppDateTime } from '@/utils/examTime'
 
+const store = useUserStore()
 const loading = ref(false)
 const saving = ref(false)
 const courses = ref([])
 const classes = ref([])
 const students = ref([])
+const teachers = ref([])
 const formVisible = ref(false)
 const enrollVisible = ref(false)
 const activeCourse = ref(null)
@@ -113,6 +128,7 @@ const form = reactive({
   id: null,
   name: '',
   description: '',
+  teacher_id: null,
 })
 
 async function loadCourses() {
@@ -128,14 +144,20 @@ function openForm(course = null) {
   form.id = course?.id || null
   form.name = course?.name || ''
   form.description = course?.description || ''
+  form.teacher_id = course?.teacher_id || null
   formVisible.value = true
 }
 
 async function saveCourse() {
   if (!form.name.trim()) return ElMessage.warning('请输入课程名称')
+  if (store.isAdmin && !form.teacher_id) return ElMessage.warning('请选择授课教师')
   saving.value = true
   try {
-    const payload = { name: form.name.trim(), description: form.description || null }
+    const payload = {
+      name: form.name.trim(),
+      description: form.description.trim() || null,
+      ...(store.isAdmin ? { teacher_id: form.teacher_id } : {}),
+    }
     if (form.id) await courseApi.update(form.id, payload)
     else await courseApi.create(payload)
     ElMessage.success('课程已保存')
@@ -204,6 +226,9 @@ onMounted(async () => {
   await Promise.all([
     loadCourses(),
     courseApi.classes().then((res) => { classes.value = res }).catch(() => { classes.value = [] }),
+    store.isAdmin
+      ? userApi.list({ role: 'teacher' }).then((res) => { teachers.value = res }).catch(() => { teachers.value = [] })
+      : Promise.resolve(),
   ])
 })
 </script>

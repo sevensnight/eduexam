@@ -5,11 +5,11 @@
         <el-input v-model="form.username" placeholder="输入你的用户名" autocomplete="username" />
       </el-form-item>
       <el-form-item prop="password" label="密码">
-        <el-input v-model="form.password" type="password" placeholder="输入你的密码" autocomplete="current-password" show-password />
+        <el-input v-model="form.password" type="password" maxlength="72" placeholder="输入你的密码" autocomplete="current-password" show-password />
       </el-form-item>
       <el-button native-type="submit" type="primary" :loading="loading" class="auth-submit">登录</el-button>
       <p class="auth-switch">没有账号？<router-link to="/register">立即注册</router-link></p>
-      <details class="auth-demo">
+      <details v-if="showDemoAccounts" class="auth-demo">
         <summary>查看演示账号</summary>
         <p>管理员：admin / admin123<br>教师：teacher1 / teacher123<br>学生：student1 / student123</p>
       </details>
@@ -29,10 +29,14 @@ const router = useRouter()
 const store = useUserStore()
 const formRef = ref()
 const loading = ref(false)
+const showDemoAccounts = import.meta.env.VITE_SHOW_DEMO_ACCOUNTS === 'true'
 const form = ref({ username: '', password: '' })
 const rules = {
   username: [{ required: true, message: '请输入用户名' }],
-  password: [{ required: true, message: '请输入密码' }],
+  password: [
+    { required: true, message: '请输入密码' },
+    { max: 72, message: '密码不能超过 72 位' },
+  ],
 }
 
 async function submit() {

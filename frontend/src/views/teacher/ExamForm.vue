@@ -18,6 +18,12 @@
       </el-form-item>
 
       <el-divider>分配与时间控制</el-divider>
+      <el-alert
+        type="info"
+        :closable="false"
+        title="开放与关闭时间统一按北京时间（Asia/Shanghai，UTC+8）保存和执行"
+        style="margin-bottom:16px"
+      />
       <el-row :gutter="12">
         <el-col :span="8">
           <el-form-item label="归属课程">
@@ -73,8 +79,15 @@
         </el-col>
         <el-col :span="8">
           <el-form-item label="及格分">
-            <span class="score-val pass">{{ passScore }}</span>
-            <span class="score-hint">分（总分×60%，向上取整）</span>
+            <el-input-number
+              v-model="form.pass_score"
+              :min="0"
+              :max="Math.max(totalScore, 0)"
+              :step="1"
+              @change="passScoreTouched = true"
+            />
+            <span class="score-hint">建议 {{ recommendedPassScore }} 分</span>
+            <el-button link type="primary" @click="useRecommendedPassScore">按 60%</el-button>
           </el-form-item>
         </el-col>
       </el-row>
@@ -83,8 +96,8 @@
 
       <!-- 搜索栏 -->
       <el-form-item label="搜索题目">
-        <el-input v-model="qSearch" placeholder="关键词搜索" style="width:240px" @input="searchQuestions" />
-        <el-select v-model="qCategory" placeholder="按分类筛选" clearable style="width:160px;margin-left:8px" @change="searchQuestions">
+        <el-input v-model="qSearch" placeholder="关键词搜索" clearable style="width:240px" @input="queueQuestionSearch" />
+        <el-select v-model="qCategory" placeholder="按分类筛选" clearable style="width:160px;margin-left:8px" @change="resetQuestionSearch">
           <el-option v-for="c in flatCategories" :key="c.id" :label="c.label" :value="c.id" />
         </el-select>
       </el-form-item>
@@ -93,18 +106,37 @@
         <el-row :gutter="12">
           <el-col :span="11">
             <div class="q-pool-header">题库（点击添加）<span v-if="poolTotal > 0" style="font-weight:normal;color:#909399;font-size:12px;margin-left:6px">共 {{ poolTotal }} 题，显示前 {{ poolQuestions.length }} 条</span></div>
-            <div class="q-pool">
+            <div class="q-pool" v-loading="poolLoading">
+              <el-alert v-if="poolError" type="error" :closable="false" title="题库加载失败" style="margin:4px 4px 8px">
+                <template #default><el-button link type="primary" @click="searchQuestions">重新加载</el-button></template>
+              </el-alert>
               <div
                 v-for="q in poolQuestions" :key="q.id"
                 class="q-item"
                 :class="{ selected: isSelected(q.id) }"
+                role="button"
+                tabindex="0"
+                :aria-disabled="isSelected(q.id)"
                 @click="addQuestion(q)"
+                @keydown.enter.prevent="addQuestion(q)"
+                @keydown.space.prevent="addQuestion(q)"
               >
                 <el-tag size="small" :type="typeTag(q.question_type)" style="margin-right:6px">{{ typeLabel(q.question_type) }}</el-tag>
                 <span>{{ q.title.slice(0, 60) }}{{ q.title.length > 60 ? '...' : '' }}</span>
               </div>
               <div v-if="!poolQuestions.length" style="padding:12px;color:#999;text-align:center">暂无题目</div>
             </div>
+            <el-pagination
+              v-if="poolTotal > poolPageSize"
+              v-model:current-page="poolPage"
+              :page-size="poolPageSize"
+              :total="poolTotal"
+              small
+              background
+              layout="prev, pager, next"
+              style="margin-top:8px;justify-content:center"
+              @current-change="searchQuestions"
+            />
           </el-col>
           <el-col :span="13">
             <div class="q-pool-header">已选题目（可拖拽排序）共 {{ form.questions.length }} 题</div>
@@ -133,7 +165,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, nextTick, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Close, Rank } from '@element-plus/icons-vue'
@@ -149,6 +181,10 @@ const qSearch = ref('')
 const qCategory = ref(null)
 const poolQuestions = ref([])
 const poolTotal = ref(0)
+const poolPage = ref(1)
+const poolPageSize = 20
+const poolLoading = ref(false)
+const poolError = ref(false)
 const allCategories = ref([])
 const courses = ref([])
 const classes = ref([])
@@ -156,11 +192,14 @@ const qTitleMap = ref({})
 const qTypeMap = ref({})
 const sortableEl = ref(null)
 let sortableInstance = null
+let searchTimer = null
+let searchRequestVersion = 0
 
 const DEFAULT_SCORES = { single: 5, multiple: 8, truefalse: 2, essay: 15 }
 
 const totalScore = computed(() => form.value.questions.reduce((sum, q) => sum + (q.score || 0), 0))
-const passScore = computed(() => Math.ceil(totalScore.value * 0.6))
+const recommendedPassScore = computed(() => Math.ceil(totalScore.value * 0.6))
+const passScoreTouched = ref(false)
 
 function initSortable() {
   if (sortableInstance) sortableInstance.destroy()
@@ -186,10 +225,20 @@ const form = ref({
   open_time: null,
   close_time: null,
   max_attempts: 1,
+  pass_score: 0,
   allow_retake: false,
   score_public: false,
   questions: [],
 })
+
+watch(totalScore, () => {
+  if (!passScoreTouched.value) form.value.pass_score = recommendedPassScore.value
+})
+
+function useRecommendedPassScore() {
+  form.value.pass_score = recommendedPassScore.value
+  passScoreTouched.value = false
+}
 
 watch(() => form.value.questions.length, async () => {
   await nextTick()
@@ -218,16 +267,46 @@ function getQTitle(id) { return qTitleMap.value[id] || `题目#${id}` }
 function getQType(id) { return qTypeMap.value[id] || 'single' }
 
 async function searchQuestions() {
-  const params = { page: 1, size: 100 }
+  const requestVersion = ++searchRequestVersion
+  const params = { page: poolPage.value, size: poolPageSize }
   if (qSearch.value) params.keyword = qSearch.value
   if (qCategory.value) params.category_id = qCategory.value
-  const res = await questionApi.list(params).catch(() => ({ items: [], total: 0 }))
-  poolQuestions.value = res.items
-  poolTotal.value = res.total || 0
-  res.items.forEach(q => {
-    qTitleMap.value[q.id] = q.title
-    qTypeMap.value[q.id] = q.question_type
-  })
+  poolLoading.value = true
+  poolError.value = false
+  try {
+    const res = await questionApi.list(params)
+    if (requestVersion !== searchRequestVersion) return
+    poolQuestions.value = res.items || []
+    poolTotal.value = res.total || 0
+    poolQuestions.value.forEach(q => {
+      qTitleMap.value[q.id] = q.title
+      qTypeMap.value[q.id] = q.question_type
+    })
+  } catch {
+    if (requestVersion !== searchRequestVersion) return
+    poolQuestions.value = []
+    poolTotal.value = 0
+    poolError.value = true
+  } finally {
+    if (requestVersion === searchRequestVersion) poolLoading.value = false
+  }
+}
+
+function queueQuestionSearch() {
+  clearTimeout(searchTimer)
+  // Invalidate an earlier response immediately; it must not flash stale
+  // results while this debounced request is waiting to start.
+  searchRequestVersion++
+  searchTimer = setTimeout(() => {
+    poolPage.value = 1
+    searchQuestions()
+  }, 300)
+}
+
+function resetQuestionSearch() {
+  clearTimeout(searchTimer)
+  poolPage.value = 1
+  searchQuestions()
 }
 
 function addQuestion(q) {
@@ -248,13 +327,16 @@ function removeQuestion(idx) {
 
 async function submit() {
   await formRef.value.validate()
+  if (form.value.pass_score == null || form.value.pass_score < 0 || form.value.pass_score > totalScore.value) {
+    return ElMessage.warning('及格分必须在 0 到总分之间')
+  }
   loading.value = true
   try {
     const payload = {
       ...form.value,
       time_limit: form.value.duration_minutes,
       total_score: totalScore.value,
-      pass_score: passScore.value,
+      pass_score: form.value.pass_score,
       course_id: form.value.course_id || null,
       target_class: form.value.target_class || null,
       open_time: toApiDate(form.value.open_time),
@@ -285,6 +367,19 @@ function toApiDate(value) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
 }
 
+function toPickerDate(value) {
+  if (!value) return null
+  const match = String(value).match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/)
+  if (!match) return null
+  // The picker edits an Asia/Shanghai wall-clock value. Constructing a local
+  // Date from its components prevents the browser timezone from shifting the
+  // displayed hour before it is serialized back as a wall-clock value.
+  return new Date(
+    Number(match[1]), Number(match[2]) - 1, Number(match[3]),
+    Number(match[4]), Number(match[5]), Number(match[6] || 0),
+  )
+}
+
 onMounted(async () => {
   const [categoryRes, courseRes, classRes] = await Promise.all([
     categoryApi.list().catch(() => []),
@@ -297,14 +392,16 @@ onMounted(async () => {
   await searchQuestions()
   if (isEdit.value) {
     const exam = await examApi.get(route.params.id)
+    passScoreTouched.value = true
     form.value = {
       title: exam.title, description: exam.description || '',
       duration_minutes: exam.duration_minutes,
       course_id: exam.course_id || null,
       target_class: exam.target_class || '',
-      open_time: exam.open_time ? new Date(exam.open_time) : null,
-      close_time: exam.close_time ? new Date(exam.close_time) : null,
+      open_time: toPickerDate(exam.open_time),
+      close_time: toPickerDate(exam.close_time),
       max_attempts: exam.max_attempts || 1,
+      pass_score: exam.pass_score ?? Math.ceil((exam.total_score || 0) * 0.6),
       allow_retake: !!exam.allow_retake,
       score_public: !!exam.score_public,
       questions: exam.exam_questions.map(eq => ({ question_id: eq.question_id, order_num: eq.order_num, score: eq.score })),
@@ -316,6 +413,13 @@ onMounted(async () => {
   }
   await nextTick()
   initSortable()
+})
+
+onUnmounted(() => {
+  clearTimeout(searchTimer)
+  searchRequestVersion++
+  sortableInstance?.destroy()
+  sortableInstance = null
 })
 </script>
 

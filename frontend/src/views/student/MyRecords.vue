@@ -26,11 +26,11 @@
         </template>
       </el-table-column>
       <el-table-column label="提交时间" width="170">
-        <template #default="{ row }">{{ row.submitted_at ? new Date(row.submitted_at).toLocaleString() : '-' }}</template>
+        <template #default="{ row }">{{ formatAppDateTime(row.submitted_at) }}</template>
       </el-table-column>
       <el-table-column label="操作" width="120" fixed="right">
         <template #default="{ row }">
-          <el-button link type="primary" @click="$router.push(`/exams/${row.exam_id}/${row.status === 'in_progress' ? 'take' : 'result'}`)">
+          <el-button link type="primary" @click="openRecord(row)">
             {{ row.status === 'in_progress' ? '继续考试' : '查看详情' }}
           </el-button>
         </template>
@@ -41,10 +41,23 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { studentApi } from '@/api'
+import { formatAppDateTime } from '@/utils/examTime'
 
+const router = useRouter()
 const loading = ref(true)
 const records = ref([])
+
+function openRecord(row) {
+  if (row.status === 'in_progress') {
+    return router.push(`/exams/${row.exam_id}/take`)
+  }
+  return router.push({
+    path: `/exams/${row.exam_id}/result`,
+    query: { recordId: String(row.id) },
+  })
+}
 
 onMounted(async () => {
   try {

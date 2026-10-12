@@ -1,6 +1,9 @@
 package com.eduexam.controller;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonSetter;
 import com.eduexam.common.AppException;
 import com.eduexam.domain.Course;
 import com.eduexam.domain.CourseEnrollment;
@@ -11,6 +14,10 @@ import com.eduexam.mapper.CourseMapper;
 import com.eduexam.mapper.ExamMapper;
 import com.eduexam.mapper.UserMapper;
 import com.eduexam.security.LoginUser;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.Size;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -35,18 +42,47 @@ public class CourseController {
                 .eq(Course::getId, courseId).last("FOR UPDATE"));
     }
 
+    private User lockActiveTeacher(Long teacherId) {
+        if (teacherId == null) return null;
+        User teacher = userMapper.selectOne(new LambdaQueryWrapper<User>()
+                .eq(User::getId, teacherId).last("FOR SHARE"));
+        if (teacher == null || !"teacher".equals(teacher.getRole())
+                || !Boolean.TRUE.equals(teacher.getIsActive()))
+            throw AppException.badRequest("授课教师不存在或已停用");
+        return teacher;
+    }
+
     @Data
     static class CourseCreateRequest {
+        @NotBlank(message = "课程名称不能为空")
+        @Size(max = 128, message = "课程名称不能超过 128 个字符")
         private String name;
+
+        @Size(max = 10000, message = "课程描述过长")
         private String description;
+
+        @Positive(message = "教师编号必须为正整数")
         private Long teacherId;
     }
 
     @Data
     static class CourseUpdateRequest {
+        @Size(min = 1, max = 128, message = "课程名称长度必须为 1-128 个字符")
         private String name;
+
+        @Size(max = 10000, message = "课程描述过长")
         private String description;
+        @JsonIgnore
+        private boolean descriptionPresent;
+
+        @Positive(message = "教师编号必须为正整数")
         private Long teacherId;
+
+        @JsonSetter("description")
+        public void setDescription(String description) {
+            this.description = description;
+            this.descriptionPresent = true;
+        }
     }
 
     private Map<String, Object> courseToMap(Course c, List<CourseEnrollment> enrollments, User teacher) {
@@ -95,18 +131,11 @@ public class CourseController {
             throw AppException.forbidden("无权访问");
         LambdaQueryWrapper<User> wrapper = new LambdaQueryWrapper<User>()
                 .eq(User::getRole, "student")
+                .eq(User::getIsActive, true)
                 .isNotNull(User::getClassName)
                 .ne(User::getClassName, "")
                 .orderByAsc(User::getClassName)
                 .select(User::getClassName);
-        if ("teacher".equals(loginUser.getRole())) {
-            List<Long> studentIds = enrollmentMapper.selectList(
-                    new LambdaQueryWrapper<CourseEnrollment>().apply(
-                            "course_id IN (SELECT id FROM courses WHERE teacher_id = " + loginUser.getUserId() + ")"))
-                    .stream().map(CourseEnrollment::getStudentId).distinct().collect(Collectors.toList());
-            if (studentIds.isEmpty()) return List.of();
-            wrapper.in(User::getId, studentIds);
-        }
         return userMapper.selectList(wrapper).stream()
                 .map(User::getClassName).filter(cn -> cn != null && !cn.isEmpty())
                 .distinct().collect(Collectors.toList());
@@ -119,17 +148,20 @@ public class CourseController {
             @AuthenticationPrincipal LoginUser loginUser) {
         if (!"admin".equals(loginUser.getRole()) && !"teacher".equals(loginUser.getRole()))
             throw AppException.forbidden("无权访问");
+
+        // A teacher may manage the roster of a course they own.  Validate the
+        // requested course instead of deriving candidates from existing
+        // enrollments, which made it impossible to populate a brand-new course.
+        if (courseId != null) {
+            Course course = courseMapper.selectById(courseId);
+            if (course == null) throw AppException.notFound("课程不存在");
+            if ("teacher".equals(loginUser.getRole())
+                    && !loginUser.getUserId().equals(course.getTeacherId()))
+                throw AppException.forbidden("无权管理该课程");
+        }
         LambdaQueryWrapper<User> wrapper = new LambdaQueryWrapper<User>()
                 .eq(User::getRole, "student").eq(User::getIsActive, true)
                 .orderByAsc(User::getClassName).orderByAsc(User::getUsername);
-        if ("teacher".equals(loginUser.getRole())) {
-            List<Long> studentIds = enrollmentMapper.selectList(
-                    new LambdaQueryWrapper<CourseEnrollment>().apply(
-                            "course_id IN (SELECT id FROM courses WHERE teacher_id = " + loginUser.getUserId() + ")"))
-                    .stream().map(CourseEnrollment::getStudentId).distinct().collect(Collectors.toList());
-            if (studentIds.isEmpty()) return List.of();
-            wrapper.in(User::getId, studentIds);
-        }
         if (className != null && !className.isBlank()) wrapper.eq(User::getClassName, className);
         return userMapper.selectList(wrapper).stream().map(u -> {
             Map<String, Object> m = new LinkedHashMap<>();
@@ -142,19 +174,19 @@ public class CourseController {
     }
 
     @PostMapping
-    public Map<String, Object> createCourse(@RequestBody CourseCreateRequest req,
+    @Transactional
+    public Map<String, Object> createCourse(@Valid @RequestBody CourseCreateRequest req,
                                              @AuthenticationPrincipal LoginUser loginUser) {
         if (!"admin".equals(loginUser.getRole()) && !"teacher".equals(loginUser.getRole()))
             throw AppException.forbidden("无权访问");
         Long teacherId = "admin".equals(loginUser.getRole()) ? req.getTeacherId() : loginUser.getUserId();
-        if (teacherId != null) {
-            User teacher = userMapper.selectById(teacherId);
-            if (teacher == null || !"teacher".equals(teacher.getRole())) throw AppException.badRequest("授课教师不存在");
-        }
+        if (teacherId == null) throw AppException.badRequest("请选择授课教师");
+        User teacher = lockActiveTeacher(teacherId);
         Course c = new Course();
-        c.setName(req.getName()); c.setDescription(req.getDescription()); c.setTeacherId(teacherId);
+        c.setName(req.getName().strip());
+        c.setDescription(req.getDescription() != null ? req.getDescription().strip() : null);
+        c.setTeacherId(teacherId);
         courseMapper.insert(c);
-        User teacher = teacherId != null ? userMapper.selectById(teacherId) : null;
         return courseToMap(c, List.of(), teacher);
     }
 
@@ -189,7 +221,7 @@ public class CourseController {
     @PutMapping("/{courseId}")
     @Transactional
     public Map<String, Object> updateCourse(@PathVariable Long courseId,
-                                             @RequestBody CourseUpdateRequest req,
+                                             @Valid @RequestBody CourseUpdateRequest req,
                                              @AuthenticationPrincipal LoginUser loginUser) {
         if (!"admin".equals(loginUser.getRole()) && !"teacher".equals(loginUser.getRole()))
             throw AppException.forbidden("无权访问");
@@ -197,14 +229,28 @@ public class CourseController {
         if (c == null) throw AppException.notFound("课程不存在");
         if ("teacher".equals(loginUser.getRole()) && !loginUser.getUserId().equals(c.getTeacherId()))
             throw AppException.forbidden("无权管理该课程");
-        if (req.getName() != null) c.setName(req.getName());
-        if (req.getDescription() != null) c.setDescription(req.getDescription());
+        if (req.getName() != null) {
+            String name = req.getName().strip();
+            if (name.isEmpty()) throw AppException.badRequest("课程名称不能为空");
+            c.setName(name);
+        }
+        if (req.isDescriptionPresent()) c.setDescription(
+                req.getDescription() != null && !req.getDescription().isBlank()
+                        ? req.getDescription().strip() : null);
         if ("admin".equals(loginUser.getRole()) && req.getTeacherId() != null) {
-            User t = userMapper.selectById(req.getTeacherId());
-            if (t == null || !"teacher".equals(t.getRole())) throw AppException.badRequest("授课教师不存在");
+            User t = lockActiveTeacher(req.getTeacherId());
+            if (!Objects.equals(c.getTeacherId(), req.getTeacherId())
+                    && examMapper.selectCount(new LambdaQueryWrapper<com.eduexam.domain.Exam>()
+                    .eq(com.eduexam.domain.Exam::getCourseId, courseId)) > 0)
+                throw AppException.conflict("该课程已有考试，不能更换授课教师");
             c.setTeacherId(req.getTeacherId());
         }
         courseMapper.updateById(c);
+        if (req.isDescriptionPresent()) {
+            courseMapper.update(null, new LambdaUpdateWrapper<Course>()
+                    .eq(Course::getId, courseId)
+                    .set(Course::getDescription, c.getDescription()));
+        }
         List<CourseEnrollment> enrollments = enrollmentMapper.selectList(
                 new LambdaQueryWrapper<CourseEnrollment>().eq(CourseEnrollment::getCourseId, courseId));
         User teacher = c.getTeacherId() != null ? userMapper.selectById(c.getTeacherId()) : null;
@@ -214,7 +260,7 @@ public class CourseController {
     @PutMapping("/{courseId}/enrollments")
     @Transactional
     public Map<String, Object> replaceEnrollments(@PathVariable Long courseId,
-                                                   @RequestBody CourseEnrollmentUpdateDTO req,
+                                                   @Valid @RequestBody CourseEnrollmentUpdateDTO req,
                                                    @AuthenticationPrincipal LoginUser loginUser) {
         if (!"admin".equals(loginUser.getRole()) && !"teacher".equals(loginUser.getRole()))
             throw AppException.forbidden("无权访问");
@@ -225,8 +271,14 @@ public class CourseController {
         List<Long> studentIds = req.getStudentIds() != null ?
                 req.getStudentIds().stream().distinct().sorted().collect(Collectors.toList()) : List.of();
         if (!studentIds.isEmpty()) {
+            // Re-read with row locks in the same stable order. This serializes
+            // enrollment with administrator role changes.
             List<Long> validIds = userMapper.selectList(new LambdaQueryWrapper<User>()
-                    .in(User::getId, studentIds).eq(User::getRole, "student").eq(User::getIsActive, true))
+                    .in(User::getId, studentIds)
+                    .eq(User::getRole, "student")
+                    .eq(User::getIsActive, true)
+                    .orderByAsc(User::getId)
+                    .last("FOR SHARE"))
                     .stream().map(User::getId).collect(Collectors.toList());
             List<Long> invalid = studentIds.stream().filter(id -> !validIds.contains(id)).collect(Collectors.toList());
             if (!invalid.isEmpty()) throw AppException.badRequest("学生不存在或不可用: " + invalid);

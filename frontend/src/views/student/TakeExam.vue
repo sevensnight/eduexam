@@ -24,6 +24,14 @@
 
       <!-- 右侧答题区 -->
       <div class="exam-main">
+        <el-alert
+          v-if="draftConflict"
+          type="warning"
+          :closable="false"
+          show-icon
+          title="检测到此答卷已在另一个标签页更新，当前页已暂停自动保存和提交。请只保留一个考试页面，刷新并确认服务器草稿后继续。"
+          style="margin-bottom:16px"
+        />
         <div class="exam-header">
           <div>
             <h2>{{ exam.title }}</h2>
@@ -49,24 +57,24 @@
             </div>
             <div class="q-title">{{ eq.question_title }}</div>
 
-            <el-radio-group v-if="eq.question_type === 'single'" v-model="answers[eq.question_id]" class="options">
+            <el-radio-group v-if="eq.question_type === 'single'" v-model="answers[eq.question_id]" class="options" :disabled="submitting">
               <el-radio v-for="opt in parseOptions(eq.options)" :key="opt" :value="opt.charAt(0)" class="option-item">
                 {{ opt }}
               </el-radio>
             </el-radio-group>
 
-            <el-checkbox-group v-else-if="eq.question_type === 'multiple'" v-model="multiAnswers[eq.question_id]" class="options">
+            <el-checkbox-group v-else-if="eq.question_type === 'multiple'" v-model="multiAnswers[eq.question_id]" class="options" :disabled="submitting">
               <el-checkbox v-for="opt in parseOptions(eq.options)" :key="opt" :value="opt.charAt(0)" class="option-item">
                 {{ opt }}
               </el-checkbox>
             </el-checkbox-group>
 
-            <el-radio-group v-else-if="eq.question_type === 'truefalse'" v-model="answers[eq.question_id]" class="options">
+            <el-radio-group v-else-if="eq.question_type === 'truefalse'" v-model="answers[eq.question_id]" class="options" :disabled="submitting">
               <el-radio value="True">正确</el-radio>
               <el-radio value="False">错误</el-radio>
             </el-radio-group>
 
-            <el-input v-else v-model="answers[eq.question_id]" type="textarea" :rows="4" placeholder="请输入你的答案" style="margin-top:12px" />
+            <el-input v-else v-model="answers[eq.question_id]" type="textarea" :rows="4" :disabled="submitting" placeholder="请输入你的答案" style="margin-top:12px" />
           </el-card>
 
           <div style="text-align:center;margin-top:20px">
@@ -109,6 +117,8 @@ import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
 import { Timer } from '@element-plus/icons-vue'
 import { examApi } from '@/api'
 import { useUserStore } from '@/stores/user'
+import { calculateDeadlineMs, secondsUntil } from '@/utils/examTime'
+import { answerListsMatch, classifyLocalDraft, createDraftSaveQueue } from '@/utils/draftSaveQueue'
 
 const route = useRoute()
 const router = useRouter()
@@ -121,17 +131,39 @@ const exam = ref(null)
 const record = ref(null)
 const recordResult = ref(null)
 const startError = ref('')
+const draftConflict = ref(false)
 const answers = reactive({})
 const multiAnswers = reactive({})
 const timeLeft = ref(0)
+const deadlineMs = ref(Number.NaN)
 let timer = null
 let serverDraftTimer = null
-let draftSaveInFlight = false
-let draftSavePending = false
+let stopDraftWatch = null
 let draftRetryCount = 0
 let warnedFiveMin = false
 let autoSubmitNotified = false
-const AUTO_SUBMIT_LEAD_SECONDS = 5
+let readyForAutoSubmit = false
+// Longer than the 2.5 s draft timeout, leaving time for the final POST after
+// an in-flight autosave is drained.
+const AUTO_SUBMIT_LEAD_SECONDS = 10
+const draftSaveQueue = createDraftSaveQueue(async payload => {
+  const response = await examApi.saveDraft(examId.value, {
+    ...payload,
+    // Read the version when the serialized task actually starts. Multiple
+    // edits queued in this tab therefore use the version returned by the
+    // preceding save, while another tab's stale write receives HTTP 409.
+    draft_version: record.value?.draft_version,
+  })
+  if (record.value && response?.draft_version != null) {
+    record.value.draft_version = response.draft_version
+    // If the student edited again while this request was in flight, preserve
+    // those newer local answers as dirty on top of the returned revision.
+    if (!submitted.value && record.value.status === 'in_progress') {
+      saveDraft(!answerListsMatch(payload.answers, buildAnswerList()))
+    }
+  }
+  return response
+})
 
 const submitResultText = computed(() => {
   if (recordResult.value?.timed_out) return '已超过作答截止时间，系统已按最后保存的答题草稿结算'
@@ -142,9 +174,11 @@ const submitResultText = computed(() => {
 function draftKey() {
   return `exam_draft_${store.user?.id || 'guest'}_${examId.value}_${record.value?.id || 'no-record'}`
 }
-function saveDraft() {
+function saveDraft(dirty = true) {
   sessionStorage.setItem(draftKey(), JSON.stringify({
     record_id: record.value?.id,
+    draft_version: record.value?.draft_version,
+    dirty,
     answers: { ...answers },
     multiAnswers: { ...multiAnswers },
   }))
@@ -164,12 +198,22 @@ function restoreServerDraft() {
 function restoreDraft() {
   try {
     const raw = sessionStorage.getItem(draftKey())
-    if (!raw) return
-    const { record_id: savedRecordId, answers: a, multiAnswers: m } = JSON.parse(raw)
-    if (savedRecordId !== record.value?.id) return
-    Object.assign(answers, a)
-    Object.assign(multiAnswers, m)
-  } catch {}
+    if (!raw) return false
+    const saved = JSON.parse(raw)
+    const decision = classifyLocalDraft(saved, record.value?.id, record.value?.draft_version)
+    if (decision.discard) {
+      clearDraft()
+      ElMessage.warning('检测到其他标签页中更新的答卷，已忽略此页面的旧本地草稿')
+      return false
+    }
+    if (!decision.restore) return false
+    Object.assign(answers, saved.answers || {})
+    Object.assign(multiAnswers, saved.multiAnswers || {})
+    return true
+  } catch {
+    clearDraft()
+    return false
+  }
 }
 
 function buildAnswerList() {
@@ -185,35 +229,36 @@ function buildAnswerList() {
 }
 
 async function saveServerDraft() {
-  if (!record.value || submitted.value || record.value.status !== 'in_progress') return
-  if (draftSaveInFlight) {
-    draftSavePending = true
-    return
-  }
-  draftSaveInFlight = true
+  if (!record.value || submitted.value || record.value.status !== 'in_progress' || draftSaveQueue.isLocked()) return
   try {
-    await examApi.saveDraft(examId.value, {
+    await draftSaveQueue.enqueue({
       record_id: record.value.id,
       answers: buildAnswerList(),
     })
     draftRetryCount = 0
   } catch (error) {
-    if (!submitted.value && draftRetryCount < 3) {
+    if (error?.response?.status === 409) {
+      draftConflict.value = true
+      draftSaveQueue.lock()
+      ElNotification({
+        title: '自动保存已暂停',
+        message: error?.response?.data?.detail || '答卷已在另一个标签页更新，请刷新后继续',
+        type: 'warning',
+        duration: 0,
+      })
+      throw error
+    }
+    if (!submitted.value && !draftSaveQueue.isLocked() && draftRetryCount < 3) {
       const retryDelay = 1000 * (2 ** draftRetryCount)
       draftRetryCount++
       scheduleServerDraft(retryDelay)
     }
     throw error
-  } finally {
-    draftSaveInFlight = false
-    if (draftSavePending) {
-      draftSavePending = false
-      scheduleServerDraft(0)
-    }
   }
 }
 
 function scheduleServerDraft(delay) {
+  if (draftSaveQueue.isLocked()) return
   clearTimeout(serverDraftTimer)
   serverDraftTimer = setTimeout(() => {
     saveServerDraft().catch(() => {})
@@ -221,6 +266,7 @@ function scheduleServerDraft(delay) {
 }
 
 function queueServerDraft() {
+  if (draftSaveQueue.isLocked()) return
   draftRetryCount = 0
   scheduleServerDraft(800)
 }
@@ -281,9 +327,17 @@ async function doSubmit() {
   submitting.value = true
   try {
     clearTimeout(serverDraftTimer)
-    draftSavePending = false
+    // Stop scheduling new drafts, then let a request already in flight finish
+    // so this tab submits the revision returned by that request. The backend
+    // rejects a different tab's stale revision instead of overwriting it.
+    draftSaveQueue.lock()
+    await draftSaveQueue.waitForIdle()
     const answerList = buildAnswerList()
-    const res = await examApi.submit(examId.value, { record_id: record.value.id, answers: answerList })
+    const res = await examApi.submit(examId.value, {
+      record_id: record.value.id,
+      draft_version: record.value.draft_version,
+      answers: answerList,
+    })
     recordResult.value = res
     submitted.value = true
     clearInterval(timer)
@@ -293,12 +347,28 @@ async function doSubmit() {
     } else {
       ElMessage.success(res.result_released ? `提交成功，得分：${res.total_score} 分` : '提交成功，成绩将在考试结束并完成批改后公布')
     }
+  } catch (error) {
+    if (error?.response?.status === 409) {
+      draftConflict.value = true
+      ElNotification({
+        title: '提交已阻止',
+        message: error?.response?.data?.detail || '答卷已在另一个标签页更新，请刷新后确认再提交',
+        type: 'warning',
+        duration: 0,
+      })
+    }
+    throw error
   } finally {
     submitting.value = false
+    if (!submitted.value && !draftConflict.value) {
+      draftSaveQueue.unlock()
+      queueServerDraft()
+    }
   }
 }
 
 function triggerAutoSubmit() {
+  if (!readyForAutoSubmit) return
   if (!autoSubmitNotified) {
     autoSubmitNotified = true
     ElMessage.warning('考试即将截止，正在自动提交答卷')
@@ -310,20 +380,51 @@ function triggerAutoSubmit() {
   }
 }
 
+function syncCountdown() {
+  if (!record.value || submitted.value) return
+  timeLeft.value = secondsUntil(deadlineMs.value)
+  if (!warnedFiveMin && timeLeft.value <= 300) {
+    warnedFiveMin = true
+    ElNotification({ title: '时间提醒', message: '距离考试结束还有 5 分钟，请尽快完成！', type: 'warning', duration: 8000 })
+  }
+  if (timeLeft.value <= AUTO_SUBMIT_LEAD_SECONDS) triggerAutoSubmit()
+}
+
+function handleVisibilityChange() {
+  if (!document.hidden) syncCountdown()
+}
+
 onMounted(async () => {
   try {
-    exam.value = await examApi.get(examId.value).catch(err => {
-      startError.value = err?.response?.data?.detail || '无法读取考试信息'
-      return null
-    })
-    if (!exam.value) return
-    record.value = await examApi.start(examId.value).catch(err => {
+    // Starting/resuming is the only endpoint allowed to return question
+    // content to a student. Public exam details are metadata-only so that
+    // reading the page cannot reveal the paper before the timer starts.
+    const startResponse = await examApi.start(examId.value).catch(err => {
       const msg = err?.response?.data?.detail || '无法开始考试'
       startError.value = msg
       return null
     })
+    if (!startResponse) return
 
-    if (!record.value) return
+    const metadata = await examApi.get(examId.value).catch(() => ({}))
+    record.value = {
+      ...startResponse,
+      id: startResponse.record_id ?? startResponse.id,
+    }
+    exam.value = {
+      ...metadata,
+      title: metadata.title ?? startResponse.title ?? '',
+      description: metadata.description ?? startResponse.description ?? '',
+      close_time: metadata.close_time ?? startResponse.close_time ?? null,
+      duration_minutes: startResponse.duration_minutes
+        ?? startResponse.time_limit
+        ?? metadata.duration_minutes
+        ?? metadata.time_limit,
+      exam_questions: startResponse.exam_questions
+        ?? startResponse.questions
+        ?? metadata.exam_questions
+        ?? [],
+    }
 
     if (record.value.status !== 'in_progress') {
       recordResult.value = record.value
@@ -332,44 +433,24 @@ onMounted(async () => {
       return
     }
 
-    const totalSecs = exam.value.duration_minutes * 60
-    const rawStarted = record.value.started_at || ''
-    // The API uses Asia/Shanghai wall-clock LocalDateTime values. Do not
-    // append `Z`, which would reinterpret the local timestamp as UTC.
-    const startedAt = new Date(rawStarted)
-    const elapsed = Math.floor((Date.now() - startedAt.getTime()) / 1000)
-    let remaining = totalSecs - elapsed
-    if (exam.value.close_time) {
-      const closeAt = new Date(exam.value.close_time)
-      if (!Number.isNaN(closeAt.getTime())) {
-        remaining = Math.min(remaining, Math.floor((closeAt.getTime() - Date.now()) / 1000))
-      }
-    }
-    timeLeft.value = Math.max(remaining, 0)
+    deadlineMs.value = calculateDeadlineMs({
+      startedAt: record.value.started_at,
+      durationMinutes: exam.value.duration_minutes,
+      closeTime: exam.value.close_time,
+    })
     // Restore persisted answers before any near-deadline auto-submit. A refresh
     // during the final seconds must not replace the student's draft with blanks.
     restoreServerDraft()
-    restoreDraft()
-    watch([answers, multiAnswers], persistDraft, { deep: true })
-    // Reconcile the freshest local/session draft back to MySQL after a refresh.
-    queueServerDraft()
-
-    if (timeLeft.value <= AUTO_SUBMIT_LEAD_SECONDS) {
-      triggerAutoSubmit()
-    }
-
-    if (timeLeft.value <= 300) warnedFiveMin = true
-
-    timer = setInterval(() => {
-      timeLeft.value = Math.max(timeLeft.value - 1, 0)
-      if (!warnedFiveMin && timeLeft.value <= 300) {
-        warnedFiveMin = true
-        ElNotification({ title: '时间提醒', message: '距离考试结束还有 5 分钟，请尽快完成！', type: 'warning', duration: 8000 })
-      }
-      if (timeLeft.value <= AUTO_SUBMIT_LEAD_SECONDS) {
-        triggerAutoSubmit()
-      }
-    }, 1000)
+    const restoredDirtyLocalDraft = restoreDraft()
+    stopDraftWatch = watch([answers, multiAnswers], persistDraft, { deep: true })
+    // Only an unsynced local snapshot based on this exact server revision
+    // needs reconciliation. A stale snapshot is discarded above.
+    if (restoredDirtyLocalDraft) queueServerDraft()
+    readyForAutoSubmit = true
+    syncCountdown()
+    timer = setInterval(syncCountdown, 1000)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    window.addEventListener('focus', syncCountdown)
   } finally {
     loading.value = false
   }
@@ -378,7 +459,11 @@ onMounted(async () => {
 onUnmounted(() => {
   clearInterval(timer)
   clearTimeout(serverDraftTimer)
-  draftSavePending = false
+  stopDraftWatch?.()
+  stopDraftWatch = null
+  draftSaveQueue.dispose()
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
+  window.removeEventListener('focus', syncCountdown)
   draftRetryCount = 0
 })
 </script>

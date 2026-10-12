@@ -77,11 +77,16 @@
         </el-form-item>
       </el-form>
 
+      <el-alert v-if="loadError" type="error" :closable="false" show-icon title="题库加载失败" style="margin-top:12px">
+        <template #default>请检查网络或后端服务。<el-button link type="primary" @click="fetchList">重新加载</el-button></template>
+      </el-alert>
+
       <el-table
         ref="tableRef"
         :data="questions"
         :row-key="getRowKey"
         v-loading="loading"
+        empty-text="暂无题目"
         style="margin-top: 12px"
       >
         <el-table-column type="expand" width="1" class-name="hidden-expand-col">
@@ -191,10 +196,12 @@ import { ElMessage } from 'element-plus'
 import { categoryApi, questionApi, tagApi } from '@/api'
 import { useUserStore } from '@/stores/user'
 import { createUploadForm, downloadBlob } from '@/utils/download'
+import { formatAppDateTime } from '@/utils/examTime'
 
 const store = useUserStore()
 const tableRef = ref(null)
 const loading = ref(false)
+const loadError = ref(false)
 const questions = ref([])
 const total = ref(0)
 const page = ref(1)
@@ -279,17 +286,19 @@ function parseOptions(raw) {
 }
 
 function formatTime(value) {
-  if (!value) return '-'
-  return new Date(value).toLocaleString()
+  return formatAppDateTime(value)
 }
 
 async function fetchList() {
   loading.value = true
+  loadError.value = false
   try {
     const result = await questionApi.list(buildQueryParams())
     questions.value = result.items
     total.value = result.total
     expandedRowKeys.value.clear()
+  } catch {
+    loadError.value = true
   } finally {
     loading.value = false
   }

@@ -19,6 +19,8 @@ class ExamUpdateDTOTest {
         assertFalse(dto.isTargetClassPresent());
         assertFalse(dto.isOpenTimePresent());
         assertFalse(dto.isCloseTimePresent());
+        assertFalse(dto.isMaxAttemptsPresent());
+        assertFalse(dto.isPassScorePresent());
     }
 
     @Test
@@ -28,7 +30,9 @@ class ExamUpdateDTOTest {
                   "course_id": null,
                   "target_class": null,
                   "open_time": null,
-                  "close_time": null
+                  "close_time": null,
+                  "max_attempts": null,
+                  "pass_score": null
                 }
                 """, ExamUpdateDTO.class);
 
@@ -36,9 +40,13 @@ class ExamUpdateDTOTest {
         assertTrue(dto.isTargetClassPresent());
         assertTrue(dto.isOpenTimePresent());
         assertTrue(dto.isCloseTimePresent());
+        assertTrue(dto.isMaxAttemptsPresent());
+        assertTrue(dto.isPassScorePresent());
         assertNull(dto.getCourseId());
         assertNull(dto.getTargetClass());
         assertNull(dto.getOpenTime());
         assertNull(dto.getCloseTime());
+        assertNull(dto.getMaxAttempts());
+        assertNull(dto.getPassScore());
     }
 }

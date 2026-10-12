@@ -44,7 +44,11 @@
             class="tag-item"
             :class="{ active: selectedTag?.id === t.id }"
             :style="{ background: t.color+'22', color: t.color, borderColor: t.color }"
+            role="button"
+            tabindex="0"
             @click="selectTag(t)"
+            @keydown.enter.prevent="selectTag(t)"
+            @keydown.space.prevent="selectTag(t)"
           >
             {{ t.name }}
             <el-popconfirm title="确认删除该标签？" @confirm="removeTag(t.id)">
@@ -185,14 +189,14 @@ async function saveCategory() {
   }
   ElMessage.success('保存成功')
   dialogVisible.value = false
-  loadCategories()
+  await loadCategories()
 }
 
 async function removeCategory(id) {
   await categoryApi.remove(id)
   ElMessage.success('删除成功')
   if (selectedCategory.value?.id === id) selectedCategory.value = null
-  loadCategories()
+  await loadCategories()
 }
 
 async function createTag() {
@@ -254,7 +258,14 @@ function collectOrder(nodes, parentId = null) {
 
 async function onNodeDrop() {
   const updates = collectOrder(categories.value)
-  await categoryApi.reorder(updates).catch(() => ElMessage.error('排序保存失败'))
+  try {
+    await categoryApi.reorder(updates)
+  } catch {
+    // Element Plus mutates the local tree before this callback. Reloading is
+    // required so a rejected reorder does not leave a false order on screen.
+    await loadCategories()
+    ElMessage.error('排序保存失败，已恢复服务器中的分类顺序')
+  }
 }
 
 const TYPE_LABELS = { single: '单选', multiple: '多选', truefalse: '判断', essay: '问答' }

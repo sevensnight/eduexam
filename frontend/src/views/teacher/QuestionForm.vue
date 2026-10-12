@@ -2,7 +2,7 @@
   <el-card :header="isEdit ? '编辑题目' : '新建题目'">
     <el-form :model="form" :rules="rules" ref="formRef" label-width="100px" style="max-width:800px">
       <el-form-item label="题目类型" prop="question_type">
-        <el-radio-group v-model="form.question_type">
+        <el-radio-group v-model="form.question_type" @change="handleQuestionTypeChange">
           <el-radio value="single">单选题</el-radio>
           <el-radio value="multiple">多选题</el-radio>
           <el-radio value="truefalse">判断题</el-radio>
@@ -31,7 +31,16 @@
           <div v-for="(opt, idx) in options" :key="idx" style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
             <el-tag style="flex-shrink:0;width:32px;text-align:center;line-height:32px;margin-left:8px">{{ String.fromCharCode(65 + idx) }}</el-tag>
             <el-input v-model="options[idx]" placeholder="选项内容" style="flex:1" />
-            <el-button circle :icon="Close" @click="options.splice(idx, 1)" type="danger" plain size="small" style="flex-shrink:0;margin-left:-8px" />
+            <el-button
+              circle
+              :icon="Close"
+              :aria-label="`删除选项 ${optionLetter(idx)}`"
+              @click="removeOption(idx)"
+              type="danger"
+              plain
+              size="small"
+              style="flex-shrink:0;margin-left:-8px"
+            />
           </div>
           <div style="margin-top:4px;margin-left:52px">
             <el-button @click="options.push('')" :icon="Plus">添加选项</el-button>
@@ -108,6 +117,14 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Plus, Close } from '@element-plus/icons-vue'
 import { questionApi, categoryApi, tagApi } from '@/api'
+import {
+  optionLetter,
+  parseAnswerLetters,
+  parseOptionList,
+  remapAnswerLettersAfterRemoval,
+  serializeOptions,
+  validateChoiceQuestion,
+} from '@/utils/questionEditor'
 
 const route = useRoute()
 const router = useRouter()
@@ -121,6 +138,7 @@ const allTags = ref([])
 const newTagPopover = ref(false)
 const newTagName = ref('')
 const newTagColor = ref('#409EFF')
+const previousQuestionType = ref('single')
 
 async function createNewTag() {
   if (!newTagName.value) return
@@ -156,26 +174,73 @@ const flatCategories = computed(() => {
   return result
 })
 
-watch(() => form.value.question_type, (type) => {
+watch(multiAnswers, (vals) => {
+  form.value.answer = [...vals].sort().join(',')
+}, { deep: true })
+
+function handleQuestionTypeChange(type) {
+  const previous = previousQuestionType.value
   if (type === 'multiple') {
+    multiAnswers.value = previous === 'single' && /^[A-Z]$/.test(form.value.answer)
+      ? [form.value.answer]
+      : []
+    form.value.answer = multiAnswers.value.join(',')
+  } else if (type === 'single') {
+    const candidates = previous === 'multiple'
+      ? multiAnswers.value
+      : parseAnswerLetters(form.value.answer)
+    form.value.answer = candidates[0] || ''
+    multiAnswers.value = []
+  } else {
     multiAnswers.value = []
     form.value.answer = ''
   }
-})
+  if (['single', 'multiple'].includes(type) && options.value.length < 2) {
+    options.value = ['', '', '', '']
+  }
+  previousQuestionType.value = type
+  formRef.value?.clearValidate('answer')
+}
 
-watch(multiAnswers, (vals) => {
-  form.value.answer = [...vals].sort().join(',')
-})
+function removeOption(index) {
+  if (options.value.length <= 2) {
+    ElMessage.warning('选择题至少需要两个选项')
+    return
+  }
+  const selected = form.value.question_type === 'multiple'
+    ? multiAnswers.value
+    : parseAnswerLetters(form.value.answer)
+  options.value.splice(index, 1)
+  const remapped = remapAnswerLettersAfterRemoval(selected, index)
+  if (form.value.question_type === 'multiple') {
+    multiAnswers.value = remapped
+  } else {
+    form.value.answer = remapped[0] || ''
+  }
+}
 
 async function submit() {
-  await formRef.value.validate()
+  const valid = await formRef.value.validate().catch(() => false)
+  if (!valid) return
+  const choiceError = validateChoiceQuestion(
+    form.value.question_type,
+    options.value,
+    form.value.answer,
+  )
+  if (choiceError) {
+    ElMessage.warning(choiceError)
+    return
+  }
   loading.value = true
   try {
-    const payload = { ...form.value }
+    const payload = {
+      ...form.value,
+      category_id: form.value.category_id ?? null,
+      tag_ids: [...form.value.tag_ids],
+      options: null,
+    }
     if (['single', 'multiple'].includes(payload.question_type)) {
-      payload.options = JSON.stringify(
-        options.value.filter(Boolean).map((o, i) => `${String.fromCharCode(65 + i)}. ${o}`)
-      )
+      payload.options = serializeOptions(options.value)
     }
     if (isEdit.value) {
       await questionApi.update(route.params.id, payload)
@@ -203,16 +268,13 @@ onMounted(async () => {
     form.value = {
       title: q.title, question_type: q.question_type, difficulty: q.difficulty,
       answer: q.answer, explanation: q.explanation || '', category_id: q.category_id,
-      tag_ids: q.tags.map(t => t.id),
+      tag_ids: (q.tags || []).map(t => t.id), options: null,
     }
-    if (q.options) {
-      try {
-        const parsed = JSON.parse(q.options)
-        options.value = parsed.map(o => o.replace(/^[A-Z]\.\s*/, ''))
-      } catch {}
-    }
+    previousQuestionType.value = q.question_type
+    const parsedOptions = parseOptionList(q.options)
+    if (parsedOptions.length) options.value = parsedOptions
     if (q.question_type === 'multiple' && q.answer) {
-      multiAnswers.value = q.answer.split(',')
+      multiAnswers.value = parseAnswerLetters(q.answer)
     }
   }
 })

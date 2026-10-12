@@ -11,14 +11,22 @@ echo.
 
 echo [1/2] Checking Node.js dependencies...
 if not exist node_modules (
-    echo First run: installing npm packages, please wait...
-    npm install
-    if errorlevel 1 (
-        echo ERROR: npm install failed
-        pause
-        exit /b 1
-    )
+    goto install_dependencies
 )
+call npm ls --depth=0 >nul 2>&1
+if errorlevel 1 goto install_dependencies
+goto dependencies_ready
+
+:install_dependencies
+echo Installing or synchronizing npm packages, please wait...
+call npm install --no-audit --no-fund
+if errorlevel 1 (
+    echo ERROR: npm install failed
+    pause
+    exit /b 1
+)
+
+:dependencies_ready
 echo Dependencies ready.
 
 echo.
@@ -44,5 +52,5 @@ echo  URL:     http://localhost:5173
 echo  Demo accounts are available only when demo seed data was enabled.
 echo ========================================
 echo.
-npm run dev
+call npm run dev
 pause

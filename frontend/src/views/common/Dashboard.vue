@@ -14,7 +14,7 @@
         </div>
         <div class="welcome-buttons">
           <el-button text :icon="Refresh" :loading="loading" @click="loadDashboard">刷新数据</el-button>
-          <el-button type="primary" :icon="store.canManage ? 'Plus' : 'Notebook'" @click="$router.push(store.canManage ? '/exams/create' : '/exams')">{{ store.canManage ? '创建考试' : '查看考试' }}</el-button>
+          <el-button type="primary" :icon="store.canManage ? Plus : Notebook" @click="$router.push(store.canManage ? '/exams/create' : '/exams')">{{ store.canManage ? '创建考试' : '查看考试' }}</el-button>
         </div>
       </div>
     </section>
@@ -65,7 +65,17 @@
 
 <script setup>
 import { ref, onMounted, computed } from 'vue'
-import { Refresh } from '@element-plus/icons-vue'
+import {
+  ArrowRight,
+  Collection,
+  Document,
+  FolderOpened,
+  Notebook,
+  Plus,
+  Refresh,
+  TrendCharts,
+  Warning,
+} from '@element-plus/icons-vue'
 import { examApi, statsApi, tagApi, studentApi } from '@/api'
 import { useUserStore } from '@/stores/user'
 
@@ -86,17 +96,17 @@ const lastUpdated = ref(null)
 const cards = computed(() => {
   if (store.isStudent) {
     return [
-      { label: '参加考试', value: myRecordCount.value, icon: 'Notebook' },
-      { label: '错题总数', value: wrongCount.value, icon: 'Warning' },
-      { label: '错题分类', value: catStats.value.length, icon: 'FolderOpened' },
-      { label: '可参加考试', value: allExamCount.value, icon: 'Document' },
+      { label: '参加考试', value: myRecordCount.value, icon: Notebook },
+      { label: '错题总数', value: wrongCount.value, icon: Warning },
+      { label: '错题分类', value: catStats.value.length, icon: FolderOpened },
+      { label: '可参加考试', value: allExamCount.value, icon: Document },
     ]
   }
   return [
-    { label: '题目总数', value: totalQuestions.value, icon: 'Document' },
-    { label: '考试总数', value: allExamCount.value, icon: 'Notebook' },
-    { label: '分类数量', value: catStats.value.length, icon: 'FolderOpened' },
-    { label: '标签数量', value: totalTags.value, icon: 'TrendCharts' },
+    { label: '题目总数', value: totalQuestions.value, icon: Document },
+    { label: '考试总数', value: allExamCount.value, icon: Notebook },
+    { label: '分类数量', value: catStats.value.length, icon: FolderOpened },
+    { label: '标签数量', value: totalTags.value, icon: TrendCharts },
   ]
 })
 
@@ -115,23 +125,23 @@ async function loadDashboard() {
   try {
   if (store.isStudent) {
     const [examsRes, wrongCatRes, recordsRes] = await Promise.all([
-      examApi.list(),
+      examApi.list({ page: 1, size: 6 }),
       studentApi.wrongBookCategoryStats(),
       studentApi.myRecords(),
     ])
-    allExamCount.value = examsRes.length
-    recentExams.value = examsRes
+    allExamCount.value = examsRes.total || 0
+    recentExams.value = examsRes.items || []
     catStats.value = wrongCatRes
     wrongCount.value = wrongCatRes.reduce((sum, item) => sum + (item.question_count || 0), 0)
     myRecordCount.value = recordsRes.length
   } else {
     const [examsRes, statsRes, tagsRes] = await Promise.all([
-      examApi.list(),
+      examApi.list({ page: 1, size: 6 }),
       statsApi.categories(),
       tagApi.list(),
     ])
-    allExamCount.value = examsRes.length
-    recentExams.value = examsRes
+    allExamCount.value = examsRes.total || 0
+    recentExams.value = examsRes.items || []
     catStats.value = statsRes
     totalQuestions.value = statsRes.reduce((sum, item) => sum + (item.question_count || 0), 0)
     totalTags.value = tagsRes.length

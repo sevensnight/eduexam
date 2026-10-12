@@ -24,8 +24,8 @@ export const tagApi = {
 
 export const questionApi = {
   list: (params) => request.get('/questions', { params }),
-  export: (params) => request.get('/questions/export', { params, responseType: 'blob' }),
-  import: (data) => request.post('/questions/import', data),
+  export: (params) => request.get('/questions/export', { params, responseType: 'blob', timeout: 120000 }),
+  import: (data) => request.post('/questions/import', data, { timeout: 120000 }),
   get: (id) => request.get(`/questions/${id}`),
   create: (data) => request.post('/questions', data),
   update: (id, data) => request.put(`/questions/${id}`, data),
@@ -39,14 +39,15 @@ export const examApi = {
   update: (id, data) => request.put(`/exams/${id}`, data),
   remove: (id) => request.delete(`/exams/${id}`),
   start: (id) => request.post(`/exams/${id}/start`),
-  saveDraft: (id, data) => request.put(`/exams/${id}/draft`, data, { suppressError: true }),
+  saveDraft: (id, data) => request.put(`/exams/${id}/draft`, data, { suppressError: true, timeout: 2500 }),
   submit: (id, data) => request.post(`/exams/${id}/submit`, data),
-  leaderboard: (id) => request.get(`/exams/${id}/leaderboard`),
+  leaderboard: (id, config = {}) => request.get(`/exams/${id}/leaderboard`, config),
   myRecord: (id) => request.get(`/exams/${id}/my-record`),
-  records: (id) => request.get(`/exams/${id}/records`),
+  record: (id, recordId) => request.get(`/exams/${id}/records/${recordId}`),
+  records: (id, params) => request.get(`/exams/${id}/records`, { params }),
   grade: (id, recordId, data) => request.put(`/exams/${id}/records/${recordId}/grade`, data),
-  exportGrades: (id, params) => request.get(`/exams/${id}/grades/export`, { params, responseType: 'blob' }),
-  importGrades: (id, data) => request.post(`/exams/${id}/grades/import`, data),
+  exportGrades: (id, params) => request.get(`/exams/${id}/grades/export`, { params, responseType: 'blob', timeout: 120000 }),
+  importGrades: (id, data) => request.post(`/exams/${id}/grades/import`, data, { timeout: 120000 }),
 }
 
 export const courseApi = {
@@ -62,7 +63,7 @@ export const courseApi = {
 
 export const statsApi = {
   categories: () => request.get('/stats/categories'),
-  exam: (id) => request.get(`/stats/exam/${id}`),
+  exam: (id, config = {}) => request.get(`/stats/exam/${id}`, config),
   insights: (id) => request.get(`/stats/exam/${id}/insights`),
   examCategoryDist: (id) => request.get(`/stats/exam/${id}/category-distribution`),
 }
@@ -84,8 +85,8 @@ export const studentApi = {
 
 export const userApi = {
   list: (params) => request.get('/users', { params }),
-  exportStudents: (params) => request.get('/users/export', { params, responseType: 'blob' }),
-  importStudents: (data) => request.post('/users/import/students', data),
+  exportStudents: (params) => request.get('/users/export', { params, responseType: 'blob', timeout: 120000 }),
+  importStudents: (data) => request.post('/users/import/students', data, { timeout: 120000 }),
   setRole: (id, role) => request.put(`/users/${id}/role?role=${role}`),
   toggleActive: (id) => request.put(`/users/${id}/toggle-active`),
 }
