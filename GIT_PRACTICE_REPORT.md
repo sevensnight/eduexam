@@ -7,6 +7,7 @@
 - 仓库可见性：Public
 - 默认分支：`main`
 - 实践日期：2026-10-09
+- 最终复核日期：2026-10-13
 
 远程仓库创建时已经包含项目根目录的 `README.md`，随后使用标准 `git clone` 命令创建独立的本地开发副本：
 
@@ -26,6 +27,14 @@ git clone https://github.com/sevensnight/eduexam.git "D:\软件工程与UML\edue
 | `a58cde6` | 配置提交 | 新增前端代理环境变量示例并补充使用说明 |
 | `c76cd4a` | 错误提交 | 故意引入 Dashboard 语法错误，用于回滚练习 |
 | `426aeb3` | 回滚提交 | 使用 `git revert` 撤销错误提交，恢复正确版本 |
+| `aaaef3b` | 文档提交 | 新增 Git 实践验收报告 |
+| `4b0e339` | 安全修复 | 限制公开注册只能创建学生账号 |
+| `6642f12` | 业务修复 | 强化考试访问控制和事务化提交 |
+| `ca6a131` | 业务修复 | 强化考试完整性并保存学生草稿 |
+| `67ffe8b` | 启动修复 | 安全化一键启动和数据库初始化流程 |
+| `a26e1ad` | 综合修复 | 修复考试流程、并发和大数据量扩展问题 |
+| `b80847b` | CI 配置 | 新增 GitHub Actions、Dependabot 和真实数据库启动检查 |
+| `0406997` | CI 修复 | 统一 npm 版本生成的锁文件，保证云端冷安装通过 |
 
 前三项开发提交的命令示例：
 
@@ -84,20 +93,26 @@ git log --oneline --decorate --graph
 - `HEAD...origin/main` 的领先和落后数量均为 `0`。
 - 工作区无未提交修改。
 - 本地与远程都使用 `main` 作为默认分支。
-- `node_modules`、`dist`、`target`、测试截图和本地 `.env` 文件均被 `.gitignore` 排除。
+- `node_modules`、`dist`、`target`、测试截图、本地 `.env` 文件和 `.eduexam.local.bat` 均被 `.gitignore` 排除。
 
 ## 五、最终质量检查
 
 ```powershell
 cd frontend
+npm ci --no-audit --no-fund
+npm audit --audit-level=high --registry=https://registry.npmjs.org/
+npm test
 npm run build
 
 cd ..\backend
-mvn test
+mvn --batch-mode --no-transfer-progress clean verify
 ```
 
-- 前端生产构建：通过。
-- 后端 Maven 测试阶段：通过；当前项目没有单元测试源文件。
-- 回滚后的最终代码处于可构建状态。
+- 前端锁定依赖冷安装：通过；官方 npm 漏洞审计结果为 `0 vulnerabilities`。
+- 前端单元测试：4 个测试文件、16 个测试全部通过；生产构建通过。
+- 后端 Maven 验证：40 个测试全部通过；可执行 JAR 打包成功。
+- GitHub Actions 的前端任务和后端任务均通过；后端任务还会在随用随毁的 MySQL 8.4 容器上执行 Flyway 全新库迁移、启动应用并验证 `/api/health` 返回数据库 `UP`。
+- GitHub 远程树已复核，共 155 个受版本控制的文件；未上传 `node_modules`、`dist`、`target`、本地环境文件或本地启动密钥。
+- 回滚后的最终代码处于可构建、可测试、可启动状态。
 
 至此，实践覆盖了公开远程仓库、README、远程克隆、本地功能开发、多次有意义提交、错误提交、版本回滚、推送以及本地与远程一致性验证。
