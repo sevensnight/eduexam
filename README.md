@@ -1,5 +1,7 @@
 # EduExam
 
+[![CI](https://github.com/sevensnight/eduexam/actions/workflows/ci.yml/badge.svg)](https://github.com/sevensnight/eduexam/actions/workflows/ci.yml)
+
 在线题库与考试管理系统，包含 Vue 3 + Vite 前端和 Spring Boot + MyBatis-Plus 后端。
 
 ## 技术栈
@@ -73,6 +75,15 @@ npm run build
 ```
 
 项目的浏览器检查脚本位于 `frontend/scripts/visual_check.py`，测试截图默认写入被 Git 忽略的 `frontend/artifacts/` 目录。
+
+## 自动化验证
+
+每次推送到 `main` 或向 `main` 提交 Pull Request 时，GitHub Actions 会自动完成以下检查：
+
+- 使用 Node.js 22 安装前端锁定依赖，检查高危依赖漏洞，运行单元测试并构建生产包。
+- 使用 Java 17 运行后端完整的 Maven `clean verify`，再用全新的 MySQL 8.4 临时数据库启动可执行 JAR，并检查 `/api/health`。
+
+CI 只连接工作流内随用随毁的 MySQL 容器，不连接本机数据库，也不读取 `.eduexam.local.bat`、本地数据库密码或本地 JWT 密钥。Dependabot 每周检查 npm、Maven 和 GitHub Actions 依赖更新；补丁和次版本更新会合并为较少的 Pull Request，主版本更新单独提交以便审查。
 
 ## Git 协作记录
 

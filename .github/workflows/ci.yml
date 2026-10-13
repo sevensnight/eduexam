@@ -1,0 +1,124 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: Frontend / Node.js 22
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    env:
+      CI: true
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22.23.3'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Audit dependencies
+        env:
+          NPM_CONFIG_FETCH_RETRIES: '5'
+          NPM_CONFIG_FETCH_RETRY_MINTIMEOUT: '10000'
+          NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT: '60000'
+          NPM_CONFIG_FETCH_TIMEOUT: '120000'
+        run: npm audit --audit-level=high --registry=https://registry.npmjs.org/
+
+      - name: Run unit tests
+        run: npm test
+
+      - name: Build production bundle
+        run: npm run build
+
+  backend:
+    name: Backend / Java 17 + MySQL 8.4
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      mysql:
+        image: mysql:8.4.11@sha256:24989179f58856db763f418010c1169fecc944e3ec1ea7e921572d83eb070f70
+        env:
+          MYSQL_DATABASE: eduexam
+          MYSQL_USER: eduexam
+          MYSQL_PASSWORD: ci-password
+          MYSQL_ROOT_PASSWORD: root-password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -u root -proot-password"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Java
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+          cache-dependency-path: backend/pom.xml
+
+      - name: Verify backend
+        run: mvn --batch-mode --no-transfer-progress clean verify
+
+      - name: Start application against a fresh database
+        env:
+          DB_HOST: 127.0.0.1
+          DB_PORT: '3306'
+          DB_NAME: eduexam
+          DB_USERNAME: eduexam
+          DB_PASSWORD: ci-password
+          DB_ALLOW_PUBLIC_KEY_RETRIEVAL: 'true'
+          DB_USE_SSL: 'false'
+          APP_JWT_SECRET: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+        run: nohup java -jar target/eduexam-1.0.0.jar > target/application.log 2>&1 &
+
+      - name: Verify application and database health
+        run: |
+          for attempt in {1..30}; do
+            if response="$(curl --fail --silent http://127.0.0.1:8080/api/health)"; then
+              echo "$response"
+              echo "$response" | grep --quiet '"status":"UP"'
+              echo "$response" | grep --quiet '"database":"UP"'
+              exit 0
+            fi
+            sleep 2
+          done
+
+          echo "Application did not become healthy."
+          cat target/application.log
+          exit 1
