@@ -8,11 +8,15 @@
 git pull --ff-only origin main
 git status
 git add .
-git commit -m "feat: 描述本次功能"
+git commit -m "功能：描述本次功能"
 git push origin main
 ```
 
-每次提交只包含一个完整、可说明的功能或修复，并使用动词开头的提交信息，便于回顾版本历史。
+每次提交只包含一项完整、可说明的功能或修复，标题和正文统一使用简体中文。标题采用“类型：具体改动”，例如“修复：解决统计图悬停遮挡”；Git、Vue、ECharts、npm 等技术名词可以保留原文。有必要时在正文说明原因和验证结果。
+
+项目约定同时记录在 `AGENTS.md` 和 `.cursor/rules/commit-messages.mdc`。未经明确授权，不为调整提交说明而改写已推送的历史。Dependabot 自动管理的依赖分支不属于人工提交规范的改写范围。
+
+日常开发只使用 `eduexam` 目录。原 `eduexam-git-practice` 是作业中的独立克隆副本，已完成克隆和回滚演示，不需要再维护第二份开发目录。
 
 ## 回滚练习
 
