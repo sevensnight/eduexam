@@ -93,6 +93,10 @@ jobs:
           cache-dependency-path: backend/pom.xml
 
       - name: Verify backend
+        env:
+          EDUEXAM_TEST_MYSQL_URL: jdbc:mysql://127.0.0.1:3306/eduexam?useUnicode=true&characterEncoding=UTF-8&allowPublicKeyRetrieval=true&useSSL=false
+          EDUEXAM_TEST_MYSQL_USER: eduexam
+          EDUEXAM_TEST_MYSQL_PASSWORD: ci-password
         run: mvn --batch-mode --no-transfer-progress clean verify
 
       - name: Start application against a fresh database
