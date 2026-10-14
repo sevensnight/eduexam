@@ -1,0 +1,40 @@
+/* Shared list layout only. Other pages keep their existing table styling. */
+.management-list .list-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; }
+.management-list .list-heading h2 { display: inline; margin: 0; font-size: 16px; letter-spacing: -.02em; }
+.management-list .list-count-badge { display: inline-block; margin-left: 9px; padding: 1px 8px; background: var(--el-fill-color-light); border-radius: 6px; color: var(--app-text-secondary); font-size: 12px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.management-list .list-body { container-type: inline-size; container-name: management; min-width: 0; }
+.management-list .list-results { position: relative; min-height: 180px; }
+.management-list .list-table { width: 100%; }
+.management-list .list-table th.el-table__cell { padding: 12px 0; }
+.management-list .list-table td.el-table__cell { padding: 18px 0; }
+.management-list .list-table .cell { padding: 0 14px; }
+.management-list .list-table .el-table__expanded-cell { padding: 0 14px 14px !important; }
+.management-list .list-table .el-table__expanded-cell:hover { background: var(--app-surface) !important; }
+.management-list .cell-stack { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; font-size: 13px; }
+.management-list .secondary-copy { color: var(--app-text-secondary); font-size: 12px; }
+.management-list .tabular { font-variant-numeric: tabular-nums; }
+.management-list .list-pagination { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--app-border); }
+.management-list .list-pagination .el-pagination { padding: 0; }
+.management-list .compact-list { display: none; }
+.management-list .compact-item { padding: 20px 0; border-bottom: 1px solid var(--app-border); min-width: 0; }
+.management-list .compact-item:first-child { padding-top: 6px; }
+.management-list .compact-item:last-child { border-bottom: 0; }
+.management-list .compact-topline { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.management-list .compact-index { margin-right: auto; font-size: 12px; color: var(--app-text-secondary); font-variant-numeric: tabular-nums; }
+.management-list .compact-footer { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+.management-list .compact-footer .el-button { font-size: 13px; }
+.management-list .compact-details { margin-top: 16px; }
+.management-list .list-error { margin-bottom: 16px; }
+@container management (max-width: 780px) {
+  .question-list .list-table { display: none; }
+  .question-list .compact-list { display: block; }
+}
+@container management (max-width: 880px) {
+  .exam-list .list-table { display: none; }
+  .exam-list .compact-list { display: block; }
+}
+@media (max-width: 767px) {
+  .management-list .list-pagination { align-items: flex-start; }
+  .management-list .list-pagination .el-pagination { max-width: 100%; }
+  .management-list .list-pagination .el-pagination__sizes { margin-right: 0; }
+}

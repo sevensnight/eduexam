@@ -1,0 +1,46 @@
+/* Shared course/user management patterns; scoped to these two pages. */
+.directory-management .directory-filters { display: flex; align-items: end; flex-wrap: wrap; gap: 16px; margin-bottom: 22px; }
+.directory-management .directory-field { display: flex; flex-direction: column; gap: 7px; min-width: 0; flex: 0 1 170px; }
+.directory-management .directory-field label { font-size: 12px; color: var(--app-text-secondary); }
+.directory-management .directory-keyword { flex: 1 1 260px; }
+.directory-management .filter-buttons { display: flex; gap: 8px; }
+.directory-management .filter-buttons .el-button { margin: 0; }
+.directory-management .directory-context { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding: 0 0 14px; color: var(--app-text-secondary); font-size: 12px; }
+.directory-management .wrap-copy { overflow-wrap: anywhere; }
+.directory-management .date-copy { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--app-text-secondary); }
+.directory-management .roster-count { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--app-text); }
+.directory-management .compact-metadata { display: flex; flex-wrap: wrap; gap: 8px 20px; color: var(--app-text-secondary); font-size: 12px; margin-top: 14px; overflow-wrap: anywhere; }
+.directory-management .compact-user-meta { display: grid; gap: 6px; font-size: 12px; margin-top: 12px; color: var(--app-text-secondary); overflow-wrap: anywhere; }
+.directory-management .user-role { display: inline-block; padding: 2px 8px; border-radius: 5px; background: var(--el-fill-color-light); color: var(--app-text-secondary); font-size: 12px; white-space: nowrap; }
+.directory-management .user-role.is-admin { color: var(--app-accent); background: var(--app-accent-soft); }
+.directory-management .user-state { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; white-space: nowrap; color: var(--app-text-secondary); }
+.directory-management .user-state::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--el-color-danger); }
+.directory-management .user-state.is-active::before { background: var(--el-color-success); }
+.directory-management .user-badges { display: flex; align-items: center; gap: 12px; }
+.directory-management .header-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.directory-management .header-actions .el-button { margin: 0; }
+.directory-management .export-arrow { margin-left: 7px; font-size: 11px; }
+.directory-detail-dialog .detail-list { display: grid; grid-template-columns: 80px minmax(0, 1fr); gap: 16px; margin: 24px 0 0; font-size: 13px; }
+.directory-detail-dialog .detail-list dt { color: var(--app-text-secondary); }
+.directory-detail-dialog .detail-list dd { min-width: 0; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--app-text); }
+.directory-form-note { font-size: 13px; color: var(--app-text-secondary); margin: 0 0 20px; line-height: 1.7; overflow-wrap: anywhere; }
+.directory-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 24px; }
+.directory-dialog-actions .el-button + .el-button { margin-left: 0; }
+@container management (max-width: 800px) {
+  .course-management .list-table { display: none; }
+  .course-management .compact-list { display: block; }
+}
+@container management (max-width: 900px) {
+  .user-management .list-table { display: none; }
+  .user-management .compact-list { display: block; }
+}
+@container management (max-width: 540px) {
+  .directory-management .directory-keyword { flex-basis: 100%; }
+  .directory-management .directory-field:not(.directory-keyword) { flex: 1 1 120px; }
+  .directory-management .filter-buttons { flex-basis: 100%; }
+  .directory-management .directory-filters { gap: 14px 12px; }
+}
+@media (max-width: 480px) {
+  .directory-management .header-actions .el-button { padding: 9px 11px; }
+  .directory-detail-dialog .detail-list { grid-template-columns: 65px minmax(0, 1fr); gap: 13px 10px; }
+}

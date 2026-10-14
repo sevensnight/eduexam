@@ -1,43 +1,24 @@
 <template>
-  <div style="max-width: 520px; margin: 0 auto">
-    <el-card header="个人资料" style="margin-bottom: 20px">
-      <el-form :model="profileForm" label-width="90px">
-        <el-form-item label="用户名">
-          <el-input :value="store.user?.username" disabled />
-        </el-form-item>
-        <el-form-item label="邮箱">
-          <el-input :value="store.user?.email" disabled />
-        </el-form-item>
-        <el-form-item label="角色">
-          <el-tag :type="roleTagType">{{ roleLabel }}</el-tag>
-        </el-form-item>
-        <el-form-item label="真实姓名">
-          <el-input v-model="profileForm.real_name" placeholder="输入真实姓名" />
-        </el-form-item>
-        <el-form-item label="班级">
-          <el-input v-if="store.user?.role !== 'student'" v-model="profileForm.class_name" placeholder="由管理员维护" />
-          <el-input v-else :value="profileForm.class_name" disabled />
-        </el-form-item>
-        <el-form-item>
-          <el-button type="primary" :loading="profileLoading" @click="saveProfile">保存</el-button>
-        </el-form-item>
+  <div class="workflow-page profile-page">
+    <el-card>
+      <template #header><div class="workflow-heading"><div><h2>个人资料</h2><p class="workflow-caption">维护个人信息，账号与角色由系统管理员管理</p></div><el-tag type="info">{{ roleLabel }}</el-tag></div></template>
+      <el-form :model="profileForm" label-position="top" class="workflow-form" :disabled="profileLoading" @submit.prevent="saveProfile">
+        <div class="form-grid">
+          <el-form-item label="用户名"><el-input :model-value="store.user?.username" disabled /></el-form-item>
+          <el-form-item label="邮箱"><el-input :model-value="store.user?.email || '未设置邮箱'" disabled /></el-form-item>
+          <el-form-item label="真实姓名"><el-input v-model="profileForm.real_name" placeholder="输入真实姓名" autocomplete="name" /></el-form-item>
+          <el-form-item label="班级"><el-input v-model="profileForm.class_name" :disabled="store.isStudent" :placeholder="store.isStudent ? '由管理员维护' : '输入班级（可选）'" /></el-form-item>
+        </div>
+        <div class="profile-save"><el-button type="primary" native-type="submit" :loading="profileLoading">保存资料</el-button></div>
       </el-form>
     </el-card>
-
-    <el-card header="修改密码">
-      <el-form ref="pwdFormRef" :model="pwdForm" :rules="pwdRules" label-width="90px">
-        <el-form-item label="原密码" prop="old_password">
-          <el-input v-model="pwdForm.old_password" type="password" maxlength="72" show-password />
-        </el-form-item>
-        <el-form-item label="新密码" prop="new_password">
-          <el-input v-model="pwdForm.new_password" type="password" maxlength="72" placeholder="8-72 位，至少包含一个字母和一个数字" show-password />
-        </el-form-item>
-        <el-form-item label="确认密码" prop="confirm">
-          <el-input v-model="pwdForm.confirm" type="password" maxlength="72" show-password />
-        </el-form-item>
-        <el-form-item>
-          <el-button type="primary" :loading="pwdLoading" @click="changePassword">修改密码</el-button>
-        </el-form-item>
+    <el-card>
+      <template #header><div class="workflow-heading"><div><h2>账号安全</h2><p class="workflow-caption">修改密码后，其他已登录会话将失效</p></div></div></template>
+      <el-form ref="pwdFormRef" :model="pwdForm" :rules="pwdRules" label-position="top" class="workflow-form password-form" :disabled="pwdLoading" @submit.prevent="changePassword">
+        <el-form-item label="原密码" prop="old_password"><el-input v-model="pwdForm.old_password" type="password" maxlength="72" show-password autocomplete="current-password" placeholder="输入当前密码" /></el-form-item>
+        <el-form-item label="新密码" prop="new_password"><el-input v-model="pwdForm.new_password" type="password" maxlength="72" show-password autocomplete="new-password" placeholder="设置新的登录密码" /><p class="workflow-caption">8–72 位，至少包含一个字母和一个数字；UTF-8 编码不超过 72 字节。</p></el-form-item>
+        <el-form-item label="确认密码" prop="confirm"><el-input v-model="pwdForm.confirm" type="password" maxlength="72" show-password autocomplete="new-password" placeholder="再次输入新密码" /></el-form-item>
+        <div class="profile-save"><el-button type="primary" native-type="submit" :loading="pwdLoading">修改密码</el-button></div>
       </el-form>
     </el-card>
   </div>
@@ -49,11 +30,11 @@ import { ElMessage } from 'element-plus'
 
 import { authApi } from '@/api'
 import { useUserStore } from '@/stores/user'
+import '@/styles/workflow.css'
 
 const store = useUserStore()
 
 const roleLabel = computed(() => ({ admin: '管理员', teacher: '教师', student: '学生' }[store.user?.role] || ''))
-const roleTagType = computed(() => ({ admin: 'danger', teacher: 'warning', student: 'success' }[store.user?.role] || 'info'))
 
 const profileForm = ref({
   real_name: store.user?.real_name || '',
@@ -62,6 +43,7 @@ const profileForm = ref({
 const profileLoading = ref(false)
 
 async function saveProfile() {
+  if (profileLoading.value) return
   profileLoading.value = true
   try {
     const payload = {
@@ -71,7 +53,8 @@ async function saveProfile() {
     const updated = await authApi.updateProfile(payload)
     store.setAuth(store.token, updated)
     ElMessage.success('保存成功')
-  } finally {
+  } catch { /* 保存失败保留输入，错误由接口层提示。 */ }
+  finally {
     profileLoading.value = false
   }
 }
@@ -107,8 +90,9 @@ const pwdRules = {
 }
 
 async function changePassword() {
+  if (pwdLoading.value) return
   const valid = await pwdFormRef.value.validate().catch(() => false)
-  if (!valid) return
+  if (!valid || pwdLoading.value) return
   pwdLoading.value = true
   try {
     const result = await authApi.changePassword({
@@ -119,8 +103,17 @@ async function changePassword() {
     ElMessage.success('密码修改成功，其他已登录会话已失效')
     pwdForm.value = { old_password: '', new_password: '', confirm: '' }
     pwdFormRef.value.resetFields()
-  } finally {
+  } catch { /* 密码未更新，保留输入以便修正。 */ }
+  finally {
     pwdLoading.value = false
   }
 }
 </script>
+
+<style scoped>
+.profile-page { grid-template-columns: minmax(0,1.2fr) minmax(0,1fr); align-items: start; }
+.profile-page > .el-card { min-width: 0; }
+.profile-save { padding-top: 8px; }
+.password-form .workflow-caption { line-height: 1.7; margin-top: 8px; }
+@media (max-width: 1200px) { .profile-page { grid-template-columns: minmax(0,1fr); } }
+</style>

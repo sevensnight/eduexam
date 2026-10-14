@@ -1,182 +1,87 @@
 <template>
-  <el-card :header="isEdit ? '编辑考试' : '创建考试'">
-    <el-form :model="form" :rules="rules" ref="formRef" label-width="100px" style="max-width:1100px">
-      <el-row :gutter="20">
-        <el-col :span="16">
-          <el-form-item label="考试名称" prop="title">
-            <el-input v-model="form.title" placeholder="输入考试名称" />
-          </el-form-item>
-        </el-col>
-        <el-col :span="8">
-          <el-form-item label="时长(分钟)" prop="duration_minutes">
-            <el-input-number v-model="form.duration_minutes" :min="5" :max="300" />
-          </el-form-item>
-        </el-col>
-      </el-row>
-      <el-form-item label="考试说明">
-        <el-input v-model="form.description" type="textarea" :rows="2" />
-      </el-form-item>
+  <div class="workflow-page exam-editor">
+    <div class="workflow-context"><el-button link :icon="Back" @click="router.push('/exams')">返回考试列表</el-button><span>设置考试信息，选题并调整分值</span></div>
+    <el-skeleton v-if="pageLoading" :rows="8" animated />
+    <el-alert v-else-if="loadError" type="error" :closable="false" title="考试设置加载失败，为避免覆盖原数据，暂不可编辑。"><el-button link type="primary" @click="initialize">重新加载</el-button></el-alert>
+    <el-form v-else ref="formRef" :model="form" :rules="rules" label-position="top" class="workflow-form exam-editor-form" :disabled="loading" novalidate @submit.prevent="submit">
+      <el-card>
+        <template #header><div class="workflow-heading"><div><h2>考试设置</h2><p class="workflow-caption">基本信息、参与范围与时间安排</p></div><span class="workflow-secondary">时间均为北京时间（UTC+8）</span></div></template>
+        <div class="form-grid">
+          <el-form-item label="考试名称" prop="title"><el-input v-model="form.title" placeholder="输入考试名称" maxlength="256" /></el-form-item>
+          <el-form-item label="考试时长（分钟）" prop="duration_minutes"><el-input-number v-model="form.duration_minutes" class="number-stepper" :min="1" :max="1440" aria-label="考试时长（分钟）" /></el-form-item>
+          <el-form-item label="考试说明" class="form-wide"><el-input v-model="form.description" type="textarea" :rows="2" placeholder="考试内容、注意事项等（选填）" /></el-form-item>
+          <el-form-item label="归属课程"><el-select v-model="form.course_id" clearable filterable placeholder="不限制课程"><el-option v-for="course in courses" :key="course.id" :label="course.name" :value="course.id" /></el-select></el-form-item>
+          <el-form-item label="目标班级"><el-select v-model="form.target_class" clearable filterable allow-create placeholder="不限制班级"><el-option v-for="name in classes" :key="name" :label="name" :value="name" /></el-select></el-form-item>
+          <el-form-item label="开放时间"><el-date-picker v-model="form.open_time" type="datetime" popper-class="exam-schedule-picker" placeholder="不设置则手动发布" /></el-form-item>
+          <el-form-item label="关闭时间"><el-date-picker v-model="form.close_time" type="datetime" popper-class="exam-schedule-picker" placeholder="不设置则手动关闭" /></el-form-item>
+        </div>
+        <div class="exam-rule-grid">
+          <div class="exam-rule"><div><strong>允许重考</strong><p>开启后可设置学生的参考次数</p></div><el-switch v-model="form.allow_retake" aria-label="允许重考" /></div>
+          <div class="exam-rule"><div><strong>公开成绩</strong><p>考试结束并完成批改后公布</p></div><el-switch v-model="form.score_public" aria-label="公开成绩" /></div>
+          <div class="exam-rule"><div><strong>参考次数</strong><p>包含首次考试</p></div><el-input-number v-model="form.max_attempts" class="number-stepper" :min="1" :max="100" :disabled="!form.allow_retake" aria-label="参考次数" /></div>
+        </div>
+      </el-card>
 
-      <el-divider>分配与时间控制</el-divider>
-      <el-alert
-        type="info"
-        :closable="false"
-        title="开放与关闭时间统一按北京时间（Asia/Shanghai，UTC+8）保存和执行"
-        style="margin-bottom:16px"
-      />
-      <el-row :gutter="12">
-        <el-col :span="8">
-          <el-form-item label="归属课程">
-            <el-select v-model="form.course_id" clearable filterable placeholder="不限制课程">
-              <el-option v-for="course in courses" :key="course.id" :label="course.name" :value="course.id" />
-            </el-select>
-          </el-form-item>
-        </el-col>
-        <el-col :span="8">
-          <el-form-item label="目标班级">
-            <el-select v-model="form.target_class" clearable filterable allow-create placeholder="不限制班级">
-              <el-option v-for="name in classes" :key="name" :label="name" :value="name" />
-            </el-select>
-          </el-form-item>
-        </el-col>
-        <el-col :span="8">
-          <el-form-item label="允许重考">
-            <el-switch v-model="form.allow_retake" active-text="允许" inactive-text="不允许" />
-          </el-form-item>
-        </el-col>
-        <el-col :span="8">
-          <el-form-item label="公开成绩">
-            <el-switch v-model="form.score_public" active-text="公开" inactive-text="不公开" />
-          </el-form-item>
-        </el-col>
-      </el-row>
-      <el-row :gutter="12">
-        <el-col :span="8">
-          <el-form-item label="开放时间">
-            <el-date-picker v-model="form.open_time" type="datetime" placeholder="可空：手动发布" style="width:100%" />
-          </el-form-item>
-        </el-col>
-        <el-col :span="8">
-          <el-form-item label="关闭时间">
-            <el-date-picker v-model="form.close_time" type="datetime" placeholder="可空：手动关闭" style="width:100%" />
-          </el-form-item>
-        </el-col>
-        <el-col :span="8">
-          <el-form-item label="参考次数">
-            <el-input-number v-model="form.max_attempts" :min="1" :max="10" :disabled="!form.allow_retake" />
-            <span class="score-hint">含首次考试</span>
-          </el-form-item>
-        </el-col>
-      </el-row>
-
-      <el-divider>分值设置</el-divider>
-      <el-row :gutter="12">
-        <el-col :span="6">
-          <el-form-item label="总分">
-            <span class="score-val">{{ totalScore }}</span>
-            <span class="score-hint">分（按题自动累计）</span>
-          </el-form-item>
-        </el-col>
-        <el-col :span="8">
-          <el-form-item label="及格分">
-            <el-input-number
-              v-model="form.pass_score"
-              :min="0"
-              :max="Math.max(totalScore, 0)"
-              :step="1"
-              @change="passScoreTouched = true"
-            />
-            <span class="score-hint">建议 {{ recommendedPassScore }} 分</span>
-            <el-button link type="primary" @click="useRecommendedPassScore">按 60%</el-button>
-          </el-form-item>
-        </el-col>
-      </el-row>
-
-      <el-divider>选题</el-divider>
-
-      <!-- 搜索栏 -->
-      <el-form-item label="搜索题目">
-        <el-input v-model="qSearch" placeholder="关键词搜索" clearable style="width:240px" @input="queueQuestionSearch" />
-        <el-select v-model="qCategory" placeholder="按分类筛选" clearable style="width:160px;margin-left:8px" @change="resetQuestionSearch">
-          <el-option v-for="c in flatCategories" :key="c.id" :label="c.label" :value="c.id" />
-        </el-select>
-      </el-form-item>
-
-      <div class="q-section">
-        <el-row :gutter="12">
-          <el-col :span="11">
-            <div class="q-pool-header">题库（点击添加）<span v-if="poolTotal > 0" style="font-weight:normal;color:#909399;font-size:12px;margin-left:6px">共 {{ poolTotal }} 题，显示前 {{ poolQuestions.length }} 条</span></div>
-            <div class="q-pool" v-loading="poolLoading">
-              <el-alert v-if="poolError" type="error" :closable="false" title="题库加载失败" style="margin:4px 4px 8px">
-                <template #default><el-button link type="primary" @click="searchQuestions">重新加载</el-button></template>
-              </el-alert>
-              <div
-                v-for="q in poolQuestions" :key="q.id"
-                class="q-item"
-                :class="{ selected: isSelected(q.id) }"
-                role="button"
-                tabindex="0"
-                :aria-disabled="isSelected(q.id)"
-                @click="addQuestion(q)"
-                @keydown.enter.prevent="addQuestion(q)"
-                @keydown.space.prevent="addQuestion(q)"
-              >
-                <el-tag size="small" :type="typeTag(q.question_type)" style="margin-right:6px">{{ typeLabel(q.question_type) }}</el-tag>
-                <span>{{ q.title.slice(0, 60) }}{{ q.title.length > 60 ? '...' : '' }}</span>
+      <el-card>
+        <template #header><div class="workflow-heading"><div><h2>试卷内容<span class="workflow-count">{{ form.questions.length }} 题</span></h2><p class="workflow-caption">从题库添加题目，在已选列表中设置分值与顺序</p></div><span class="editor-total">总分 <strong>{{ totalScore }}</strong> 分</span></div></template>
+        <div class="workflow-body">
+          <div class="question-picker">
+            <section class="picker-pool" aria-label="题库选题">
+              <div class="picker-heading"><h3>题库</h3><span>{{ poolTotal }} 道题</span></div>
+              <div class="picker-filters"><el-input v-model="qSearch" :prefix-icon="Search" placeholder="搜索题目关键词" aria-label="搜索题库" clearable @input="queueQuestionSearch" /><el-select v-model="qCategory" placeholder="全部分类" aria-label="筛选题目分类" clearable @change="resetQuestionSearch"><el-option v-for="c in flatCategories" :key="c.id" :label="c.label" :value="c.id" /></el-select></div>
+              <div v-loading="poolLoading" class="q-pool">
+                <el-alert v-if="poolError" type="error" :closable="false" title="题库加载失败"><el-button link type="primary" @click="searchQuestions">重新加载</el-button></el-alert>
+                <div v-for="q in poolQuestions" :key="q.id" class="pool-question" :class="{ 'is-selected': isSelected(q.id) }">
+                  <div class="pool-question-copy"><span class="picker-type">{{ typeLabel(q.question_type) }}</span><button type="button" class="picker-title" @click="preview(q.id)">{{ q.title }}</button></div>
+                  <el-button link type="primary" :icon="isSelected(q.id) ? Check : undefined" :disabled="isSelected(q.id)" :aria-label="(isSelected(q.id) ? '已添加：' : '添加题目：') + q.title" @click="addQuestion(q)">{{ isSelected(q.id) ? '已添加' : '添加' }}</el-button>
+                </div>
+                <el-empty v-if="!poolLoading && !poolError && !poolQuestions.length" :image-size="50" description="没有匹配的题目" />
               </div>
-              <div v-if="!poolQuestions.length" style="padding:12px;color:#999;text-align:center">暂无题目</div>
-            </div>
-            <el-pagination
-              v-if="poolTotal > poolPageSize"
-              v-model:current-page="poolPage"
-              :page-size="poolPageSize"
-              :total="poolTotal"
-              small
-              background
-              layout="prev, pager, next"
-              style="margin-top:8px;justify-content:center"
-              @current-change="searchQuestions"
-            />
-          </el-col>
-          <el-col :span="13">
-            <div class="q-pool-header">已选题目（可拖拽排序）共 {{ form.questions.length }} 题</div>
-            <div class="q-pool" ref="sortableEl">
-              <div v-for="(item, idx) in form.questions" :key="item.question_id" class="q-item selected-item">
-                <el-icon class="sortable-handle" style="cursor:grab;color:#C0C4CC;margin-right:4px"><Rank /></el-icon>
-                <span class="order-num">{{ idx + 1 }}</span>
-                <el-tag size="small" :type="typeTag(getQType(item.question_id))" style="margin-right:6px;flex-shrink:0">{{ typeLabel(getQType(item.question_id)) }}</el-tag>
-                <span style="flex:1">{{ getQTitle(item.question_id) }}</span>
-                <el-input-number v-model="item.score" :min="1" :max="50" size="small" style="width:80px;margin:0 8px" />
-                <span style="font-size:12px;color:#909399">分</span>
-                <el-button circle :icon="Close" type="danger" plain size="small" @click="removeQuestion(idx)" style="margin-left:8px" />
+              <el-pagination v-if="poolTotal > poolPageSize" v-model:current-page="poolPage" :page-size="poolPageSize" :total="poolTotal" :pager-count="5" small layout="prev, pager, next" class="picker-pagination" @current-change="searchQuestions" />
+            </section>
+            <section class="picker-selected" aria-label="已选试题">
+              <div class="picker-heading"><h3>已选题目</h3><span>拖拽或使用箭头调整顺序</span></div>
+              <div ref="sortableEl" class="q-pool selected-pool">
+                <div v-for="(item, idx) in form.questions" :key="item.question_id" class="selected-item" :data-question-id="item.question_id">
+                  <div class="selected-question-heading"><el-icon class="sortable-handle" aria-hidden="true"><Rank /></el-icon><span class="order-num">{{ idx + 1 }}</span><span class="picker-type">{{ typeLabel(getQType(item.question_id)) }}</span><el-button link :icon="Close" :aria-label="'移除第 ' + (idx + 1) + ' 题'" @click="removeQuestion(idx)" /></div>
+                  <button type="button" class="picker-title" @click="preview(item.question_id)">{{ getQTitle(item.question_id) }}</button>
+                  <div class="selected-question-tools"><div class="score-control"><span>分值</span><el-input-number v-model="item.score" class="number-stepper" :min="0" size="small" :aria-label="'第 ' + (idx + 1) + ' 题分值'" /><span>分</span></div><div class="order-controls"><el-button link :icon="ArrowUp" :disabled="idx === 0" :aria-label="'上移第 ' + (idx + 1) + ' 题'" @click="moveQuestion(idx, idx - 1)" /><el-button link :icon="ArrowDown" :disabled="idx === form.questions.length - 1" :aria-label="'下移第 ' + (idx + 1) + ' 题'" @click="moveQuestion(idx, idx + 1)" /></div></div>
+                </div>
+                <el-empty v-if="!form.questions.length" :image-size="56" description="从题库添加题目，开始组卷" />
               </div>
-              <div v-if="!form.questions.length" style="padding:12px;color:#999;text-align:center">点击左侧题目添加</div>
-            </div>
-          </el-col>
-        </el-row>
-      </div>
-
-      <div class="q-section" style="margin-top:20px">
-        <el-button type="primary" :loading="loading" @click="submit">保存考试</el-button>
-        <el-button @click="$router.back()">取消</el-button>
-      </div>
+            </section>
+          </div>
+          <div class="exam-scoring"><div><strong>及格分</strong><p class="form-note">按当前试卷总分计算，建议 {{ recommendedPassScore }} 分</p></div><div class="workflow-actions"><el-input-number v-model="form.pass_score" class="number-stepper" :min="0" :max="Math.max(totalScore, 0)" :step="1" aria-label="及格分" @change="passScoreTouched = true" /><el-button link type="primary" @click="useRecommendedPassScore">设为总分的 60%</el-button></div></div>
+        </div>
+      </el-card>
+      <footer class="workflow-footer"><span class="workflow-secondary">已选 {{ form.questions.length }} 题 · 总分 {{ totalScore }} 分 · 及格 {{ form.pass_score ?? '未设置' }} 分</span><div class="workflow-actions"><el-button @click="router.push('/exams')">取消</el-button><el-button type="primary" :loading="loading" native-type="submit">保存考试</el-button></div></footer>
     </el-form>
-  </el-card>
+    <QuestionPreviewDialog v-model="previewVisible" :question-id="previewQuestionId" />
+  </div>
 </template>
-
 <script setup>
-import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import { ref, computed, onUnmounted, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Close, Rank } from '@element-plus/icons-vue'
+import { ArrowUp, ArrowDown, Back, Search, Close, Rank, Check } from '@element-plus/icons-vue'
 import Sortable from 'sortablejs'
 import { examApi, questionApi, categoryApi, courseApi } from '@/api'
+import QuestionPreviewDialog from '@/components/lists/QuestionPreviewDialog.vue'
+
+import { moveExamQuestion, validateExamSettings } from '@/utils/examPresentation'
+import '@/styles/workflow.css'
 
 const route = useRoute()
 const router = useRouter()
 const isEdit = computed(() => !!route.params.id)
 const formRef = ref()
 const loading = ref(false)
+const pageLoading = ref(true)
+const loadError = ref(false)
+const previewQuestionId = ref(null)
+const previewVisible = ref(false)
+let initVersion = 0
+let disposed = false
 const qSearch = ref('')
 const qCategory = ref(null)
 const poolQuestions = ref([])
@@ -207,11 +112,12 @@ function initSortable() {
   sortableInstance = Sortable.create(sortableEl.value, {
     animation: 150,
     handle: '.sortable-handle',
-    onEnd({ oldIndex, newIndex }) {
-      const list = form.value.questions
-      const moved = list.splice(oldIndex, 1)[0]
-      list.splice(newIndex, 0, moved)
-      list.forEach((q, i) => q.order_num = i + 1)
+    draggable: '.selected-item',
+    onEnd({ item, oldDraggableIndex, newDraggableIndex }) {
+      const parent = item.parentNode
+      parent.removeChild(item)
+      parent.insertBefore(item, parent.children[oldDraggableIndex] || null)
+      moveQuestion(oldDraggableIndex, newDraggableIndex)
     },
   })
 }
@@ -260,7 +166,6 @@ const flatCategories = computed(() => {
   return result
 })
 
-function typeTag(t) { return { single: '', multiple: 'warning', truefalse: 'success', essay: 'info' }[t] || '' }
 function typeLabel(t) { return { single: '单选', multiple: '多选', truefalse: '判断', essay: '简答' }[t] || t }
 function isSelected(id) { return form.value.questions.some(q => q.question_id === id) }
 function getQTitle(id) { return qTitleMap.value[id] || `题目#${id}` }
@@ -310,6 +215,7 @@ function resetQuestionSearch() {
 }
 
 function addQuestion(q) {
+  if (loading.value) return
   if (isSelected(q.id)) return ElMessage.warning('该题已添加')
   qTitleMap.value[q.id] = q.title
   qTypeMap.value[q.id] = q.question_type
@@ -321,19 +227,23 @@ function addQuestion(q) {
 }
 
 function removeQuestion(idx) {
+  if (loading.value) return
   form.value.questions.splice(idx, 1)
   form.value.questions.forEach((q, i) => q.order_num = i + 1)
 }
 
 async function submit() {
-  await formRef.value.validate()
-  if (form.value.pass_score == null || form.value.pass_score < 0 || form.value.pass_score > totalScore.value) {
-    return ElMessage.warning('及格分必须在 0 到总分之间')
-  }
+  if (loading.value || pageLoading.value || loadError.value) return
+  if (!await formRef.value.validate().catch(() => false)) return
+  if (loading.value) return
+  const error = validateExamSettings(form.value)
+  if (error) return ElMessage.warning(error)
   loading.value = true
   try {
     const payload = {
       ...form.value,
+      title: form.value.title.trim(),
+      questions: form.value.questions.map((q, index) => ({ ...q, order_num: index + 1 })),
       time_limit: form.value.duration_minutes,
       total_score: totalScore.value,
       pass_score: form.value.pass_score,
@@ -351,6 +261,8 @@ async function submit() {
       ElMessage.success('创建成功')
     }
     router.push('/exams')
+  } catch {
+    // Preserve the form when validation or server-side exam rules reject the save.
   } finally {
     loading.value = false
   }
@@ -380,42 +292,64 @@ function toPickerDate(value) {
   )
 }
 
-onMounted(async () => {
-  const [categoryRes, courseRes, classRes] = await Promise.all([
-    categoryApi.list().catch(() => []),
-    courseApi.list().catch(() => []),
-    courseApi.classes().catch(() => []),
-  ])
-  allCategories.value = categoryRes
-  courses.value = courseRes
-  classes.value = classRes
-  await searchQuestions()
-  if (isEdit.value) {
-    const exam = await examApi.get(route.params.id)
-    passScoreTouched.value = true
-    form.value = {
+function moveQuestion(from, to) {
+  if (!loading.value) form.value.questions = moveExamQuestion(form.value.questions, from, to)
+}
+function preview(questionId) { previewQuestionId.value = questionId; previewVisible.value = true }
+
+async function initialize() {
+  const version = ++initVersion
+  previewVisible.value = false
+  previewQuestionId.value = null
+  pageLoading.value = true
+  loadError.value = false
+  clearTimeout(searchTimer)
+  ++searchRequestVersion
+  qSearch.value = ''
+  qCategory.value = null
+  poolPage.value = 1
+  try {
+    const [categoryRes, courseRes, classRes, exam] = await Promise.all([
+      categoryApi.list(), courseApi.list(), courseApi.classes(),
+      isEdit.value ? examApi.get(route.params.id) : Promise.resolve(null),
+    ])
+    if (disposed || version !== initVersion) return
+    allCategories.value = categoryRes
+    courses.value = courseRes
+    classes.value = classRes
+    qTitleMap.value = {}
+    qTypeMap.value = {}
+    passScoreTouched.value = !!exam
+    form.value = exam ? {
       title: exam.title, description: exam.description || '',
       duration_minutes: exam.duration_minutes,
-      course_id: exam.course_id || null,
-      target_class: exam.target_class || '',
-      open_time: toPickerDate(exam.open_time),
-      close_time: toPickerDate(exam.close_time),
+      course_id: exam.course_id || null, target_class: exam.target_class || '',
+      open_time: toPickerDate(exam.open_time), close_time: toPickerDate(exam.close_time),
       max_attempts: exam.max_attempts || 1,
       pass_score: exam.pass_score ?? Math.ceil((exam.total_score || 0) * 0.6),
-      allow_retake: !!exam.allow_retake,
-      score_public: !!exam.score_public,
-      questions: exam.exam_questions.map(eq => ({ question_id: eq.question_id, order_num: eq.order_num, score: eq.score })),
-    }
-    exam.exam_questions.forEach(eq => {
+      allow_retake: !!exam.allow_retake, score_public: !!exam.score_public,
+      questions: (exam.exam_questions || []).map(eq => ({ question_id: eq.question_id, order_num: eq.order_num, score: eq.score })),
+    } : { title: '', description: '', duration_minutes: 60, course_id: null, target_class: '', open_time: null, close_time: null, max_attempts: 1, pass_score: 0, allow_retake: false, score_public: false, questions: [] }
+    for (const eq of exam?.exam_questions || []) {
       if (eq.question_title) qTitleMap.value[eq.question_id] = eq.question_title
       if (eq.question_type) qTypeMap.value[eq.question_id] = eq.question_type
-    })
+    }
+    searchQuestions()
+  } catch {
+    if (version === initVersion && !disposed) loadError.value = true
+  } finally {
+    if (version === initVersion && !disposed) {
+      pageLoading.value = false
+      await nextTick()
+      initSortable()
+    }
   }
-  await nextTick()
-  initSortable()
-})
+}
+watch(() => route.params.id, initialize, { immediate: true })
 
 onUnmounted(() => {
+  disposed = true
+  ++initVersion
   clearTimeout(searchTimer)
   searchRequestVersion++
   sortableInstance?.destroy()
@@ -424,20 +358,41 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.q-pool-header { font-weight: bold; margin-bottom: 8px; color: #303133; font-size: 13px; }
-.q-pool { border: 1px solid #DCDFE6; border-radius: 6px; max-height: 380px; overflow-y: auto; padding: 4px; }
-.q-item { padding: 8px 10px; border-radius: 4px; cursor: pointer; font-size: 13px; display: flex; align-items: center; }
-.q-item:hover { background: #F5F7FA; }
-.q-item.selected { opacity: 0.4; cursor: not-allowed; }
-.selected-item { background: #EEF6FF; margin-bottom: 4px; cursor: default; }
-.selected-item:hover { background: #E1F0FF; }
-.order-num { min-width: 22px; height: 22px; background: #409EFF; color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; margin-right: 8px; }
-.q-section { margin-left: 32px; }
-@media (max-width: 767px) {
-  .q-section { margin-left: 0; }
-  .q-pool { max-height: 300px; }
-}
-.score-val { font-size: 20px; font-weight: bold; color: #409EFF; }
-.score-val.pass { color: #67C23A; }
-.score-hint { font-size: 12px; color: #909399; margin-left: 6px; }
+.exam-editor-form { display: grid; gap: 20px; }
+.exam-rule-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 16px; border-top: 1px solid var(--app-border); padding-top: 20px; }
+.exam-rule { display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; align-items: center; min-width: 0; }
+.exam-rule strong, .exam-scoring strong { font-size: 13px; font-weight: 500; }
+.exam-rule p { margin: 5px 0 0; font-size: 12px; color: var(--app-text-secondary); }
+.exam-rule .number-stepper { width: 132px; flex-shrink: 0; }
+.editor-total { color: var(--app-text-secondary); font-size: 12px; }
+.editor-total strong { font-size: 24px; color: var(--app-text); margin-inline: 5px; font-variant-numeric: tabular-nums; }
+.question-picker { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1.1fr); gap: 24px; }
+.picker-heading { display: flex; justify-content: space-between; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 14px; }
+.picker-heading h3 { font-size: 14px; font-weight: 500; margin: 0; }
+.picker-heading > span { font-size: 12px; color: var(--app-text-secondary); }
+.picker-filters { display: grid; grid-template-columns: minmax(0,1.3fr) minmax(0,1fr); gap: 10px; margin-bottom: 12px; }
+.q-pool { max-height: 480px; min-height: 200px; overflow-y: auto; overscroll-behavior: contain; border: 1px solid var(--app-border); border-radius: 10px; }
+.pool-question { display: flex; align-items: center; gap: 14px; padding: 16px; border-bottom: 1px solid var(--app-border); }
+.pool-question:last-child { border: 0; } .pool-question.is-selected { background: var(--app-selection-bg); box-shadow: inset 3px 0 var(--app-selection-border); }
+.pool-question.is-selected .picker-title { color: var(--app-selection-ink); font-weight: 500; }
+.pool-question.is-selected :deep(.el-button.is-disabled) { color: var(--app-selection-ink); }
+.pool-question-copy { min-width: 0; flex: 1; }
+.picker-type { color: #627184; font-size: 11px; }
+.picker-title { border: 0; background: transparent; text-align: left; padding: 0; color: var(--app-text); font-size: 13px; line-height: 1.75; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.picker-title:hover { color: var(--app-accent); }
+.pool-question .picker-title { margin-top: 5px; }
+.selected-item { padding: 16px; border-bottom: 1px solid var(--app-border); } .selected-item:last-child { border: 0; }
+.selected-question-heading { display: flex; align-items: center; gap: 8px; margin-bottom: 9px; }
+.selected-question-heading > .el-button { margin-left: auto; color: var(--app-text-secondary); }
+.sortable-handle { cursor: grab; color: #858b95; touch-action: none; }
+.order-num { color: var(--app-text-secondary); font-size: 12px; font-variant-numeric: tabular-nums; }
+.selected-question-tools, .score-control, .order-controls { display: flex; align-items: center; gap: 9px; }
+.selected-question-tools { flex-wrap: wrap; justify-content: space-between; margin-top: 13px; }
+.score-control { color: var(--app-text-secondary); font-size: 12px; } .score-control .number-stepper { width: 132px; }
+.order-controls .el-button { margin: 0; padding: 4px; }
+.picker-pagination { justify-content: center; margin-top: 12px; padding: 0; }
+.exam-scoring { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; border-top: 1px solid var(--app-border); padding-top: 22px; margin-top: 24px; }
+@container workflow (max-width: 700px) { .question-picker { grid-template-columns: minmax(0,1fr); } .q-pool { max-height: 420px; } }
+@media (max-width: 1100px) { .exam-rule-grid { grid-template-columns: minmax(0,1fr); } }
+@media (max-width: 540px) { .picker-filters { grid-template-columns: minmax(0,1fr); } .pool-question,.selected-item { padding: 12px; } }
 </style>

@@ -1,10 +1,12 @@
 <template>
-  <div class="exam-page" v-loading="loading">
+  <div class="exam-page workflow-page" v-loading="loading">
     <div v-if="exam && record && !submitted" class="exam-layout">
       <!-- 左侧进度导航 -->
       <div class="progress-nav">
-        <div class="nav-title">答题进度</div>
-        <div class="nav-grid">
+        <div class="nav-title">答题进度<span>{{ answeredCount }} / {{ exam.exam_questions.length }}</span></div>
+        <div class="timer" :class="{ urgent: timeLeft < 300 }"><span>剩余时间</span><strong>{{ formatTime(timeLeft) }}</strong></div>
+        <button type="button" class="mobile-nav-toggle" :aria-expanded="navExpanded" aria-controls="answer-navigation" @click="navExpanded = !navExpanded">{{ navExpanded ? '收起答题卡' : '展开答题卡' }}</button>
+        <div id="answer-navigation" class="nav-grid" :class="{ 'is-open': navExpanded }">
           <button
             type="button"
             v-for="(eq, idx) in exam.exam_questions"
@@ -15,11 +17,11 @@
             :aria-label="'跳到第 ' + (idx + 1) + ' 题'"
           >{{ idx + 1 }}</button>
         </div>
-        <div class="nav-legend">
+        <div class="nav-legend" :class="{ 'is-open': navExpanded }">
           <span class="legend-dot answered"></span>已答
           <span class="legend-dot unanswered" style="margin-left:8px"></span>未答
         </div>
-        <div class="nav-stats">{{ answeredCount }}/{{ exam.exam_questions.length }}</div>
+        <p class="nav-save-note">答题内容会自动保存</p>
       </div>
 
       <!-- 右侧答题区 -->
@@ -37,10 +39,7 @@
             <h2>{{ exam.title }}</h2>
             <el-text type="info">{{ exam.description }}</el-text>
           </div>
-          <div class="timer" :class="{ urgent: timeLeft < 300 }">
-            <el-icon><Timer /></el-icon>
-            剩余时间：{{ formatTime(timeLeft) }}
-          </div>
+
         </div>
 
         <div class="questions-area">
@@ -57,29 +56,27 @@
             </div>
             <div class="q-title">{{ eq.question_title }}</div>
 
-            <el-radio-group v-if="eq.question_type === 'single'" v-model="answers[eq.question_id]" class="options" :disabled="submitting">
+            <el-radio-group v-if="eq.question_type === 'single'" v-model="answers[eq.question_id]" class="options" :disabled="submitting || draftConflict">
               <el-radio v-for="opt in parseOptions(eq.options)" :key="opt" :value="opt.charAt(0)" class="option-item">
-                {{ opt }}
+                <span class="option-copy">{{ opt }}</span><AnswerStateBadge v-if="answers[eq.question_id] === opt.charAt(0)" />
               </el-radio>
             </el-radio-group>
 
-            <el-checkbox-group v-else-if="eq.question_type === 'multiple'" v-model="multiAnswers[eq.question_id]" class="options" :disabled="submitting">
+            <el-checkbox-group v-else-if="eq.question_type === 'multiple'" v-model="multiAnswers[eq.question_id]" class="options" :disabled="submitting || draftConflict">
               <el-checkbox v-for="opt in parseOptions(eq.options)" :key="opt" :value="opt.charAt(0)" class="option-item">
-                {{ opt }}
+                <span class="option-copy">{{ opt }}</span><AnswerStateBadge v-if="multiAnswers[eq.question_id]?.includes(opt.charAt(0))" />
               </el-checkbox>
             </el-checkbox-group>
 
-            <el-radio-group v-else-if="eq.question_type === 'truefalse'" v-model="answers[eq.question_id]" class="options" :disabled="submitting">
-              <el-radio value="True">正确</el-radio>
-              <el-radio value="False">错误</el-radio>
+            <el-radio-group v-else-if="eq.question_type === 'truefalse'" v-model="answers[eq.question_id]" class="options" :disabled="submitting || draftConflict">
+              <el-radio value="True"><span class="option-copy">正确</span><AnswerStateBadge v-if="answers[eq.question_id] === 'True'" /></el-radio>
+              <el-radio value="False"><span class="option-copy">错误</span><AnswerStateBadge v-if="answers[eq.question_id] === 'False'" /></el-radio>
             </el-radio-group>
 
-            <el-input v-else v-model="answers[eq.question_id]" type="textarea" :rows="4" :disabled="submitting" placeholder="请输入你的答案" style="margin-top:12px" />
+            <el-input v-else v-model="answers[eq.question_id]" type="textarea" :rows="4" :disabled="submitting || draftConflict" placeholder="请输入你的答案" style="margin-top:12px" />
           </el-card>
 
-          <div style="text-align:center;margin-top:20px">
-            <el-button type="primary" size="large" @click="confirmSubmit" :loading="submitting">提交答卷</el-button>
-          </div>
+          <div class="exam-submit-bar"><span>已完成 {{ answeredCount }} / {{ exam.exam_questions.length }} 题<span v-if="answeredCount < exam.exam_questions.length">，还有 {{ exam.exam_questions.length - answeredCount }} 题未答</span></span><el-button type="primary" @click="confirmSubmit" :loading="submitting" :disabled="draftConflict">提交答卷</el-button></div>
         </div>
       </div>
     </div>
@@ -114,16 +111,18 @@
 import { ref, reactive, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
-import { Timer } from '@element-plus/icons-vue'
+import '@/styles/workflow.css'
 import { examApi } from '@/api'
 import { useUserStore } from '@/stores/user'
 import { calculateDeadlineMs, secondsUntil } from '@/utils/examTime'
 import { answerListsMatch, classifyLocalDraft, createDraftSaveQueue } from '@/utils/draftSaveQueue'
+import AnswerStateBadge from '@/components/lists/AnswerStateBadge.vue'
 
 const route = useRoute()
 const router = useRouter()
 const store = useUserStore()
 const examId = computed(() => route.params.id)
+const navExpanded = ref(false)
 const loading = ref(true)
 const submitting = ref(false)
 const submitted = ref(false)
@@ -301,10 +300,12 @@ const answeredCount = computed(() => {
 
 function scrollTo(idx) {
   const el = document.getElementById(`q-${idx}`)
-  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  navExpanded.value = false
+  if (el) requestAnimationFrame(() => el.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block: 'start' }))
 }
 
 async function confirmSubmit() {
+  if (submitting.value || draftConflict.value) return
   const unanswered = exam.value.exam_questions.filter(eq => !isAnswered(eq))
   if (unanswered.length > 0) {
     try {
@@ -316,14 +317,14 @@ async function confirmSubmit() {
     } catch { return }
   } else {
     try {
-      await ElMessageBox.confirm('确认提交答卷？提交后无法修改。', '提示', { type: 'warning' })
+      await ElMessageBox.confirm('确认提交答卷？提交后无法修改。', '提交答卷', { type: 'warning', confirmButtonText: '确认提交', cancelButtonText: '继续检查' })
     } catch { return }
   }
-  await doSubmit()
+  await doSubmit().catch(() => {})
 }
 
 async function doSubmit() {
-  if (submitting.value || !record.value) return
+  if (submitting.value || draftConflict.value || !record.value) return
   submitting.value = true
   try {
     clearTimeout(serverDraftTimer)
@@ -368,7 +369,7 @@ async function doSubmit() {
 }
 
 function triggerAutoSubmit() {
-  if (!readyForAutoSubmit) return
+  if (!readyForAutoSubmit || draftConflict.value) return
   if (!autoSubmitNotified) {
     autoSubmitNotified = true
     ElMessage.warning('考试即将截止，正在自动提交答卷')
@@ -468,51 +469,60 @@ onUnmounted(() => {
 })
 </script>
 
+
 <style scoped>
-.exam-page { max-width: 1100px; margin: 0 auto; }
-.exam-layout { display: flex; gap: 24px; align-items: flex-start; }
-.progress-nav {
-  width: 172px; flex-shrink: 0; position: sticky; top: 100px;
-  background: var(--app-surface); border-radius: 16px; padding: 20px;
-  border: 1px solid var(--app-border);
-  max-height: calc(100dvh - 124px); overflow-y: auto;
-}
-.nav-title { font-weight: bold; font-size: 13px; color: #303133; margin-bottom: 12px; text-align: center; }
-.nav-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 12px; }
-.nav-item {
-  width: 28px; height: 32px; border-radius: 6px; border: 0;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 12px; cursor: pointer; font-weight: bold;
-}
+.exam-page { max-width: 1180px; margin: 0 auto; }
+.exam-layout { display: grid; grid-template-columns: 190px minmax(0,1fr); gap: 24px; align-items: start; }
+.progress-nav { position: sticky; top: 100px; background: white; border-radius: 14px; padding: 20px; border: 1px solid var(--app-border); max-height: calc(100dvh - 124px); overflow-y: auto; }
+.nav-title { display: flex; justify-content: space-between; gap: 12px; font-weight: 500; font-size: 13px; margin-bottom: 20px; }
+.nav-title > span { color: var(--app-text-secondary); font-weight: 400; font-variant-numeric: tabular-nums; }
+.timer { margin-bottom: 22px; padding-bottom: 20px; border-bottom: 1px solid var(--app-border); display: grid; gap: 5px; }
+.timer > span { color: var(--app-text-secondary); font-size: 11px; }
+.timer > strong { font-size: 28px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: 1px; color: var(--app-accent); }
+.timer.urgent > strong { color: var(--el-color-danger); }
+.nav-grid { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 7px; margin-bottom: 16px; }
+.nav-item { min-width: 0; height: 32px; border-radius: 6px; border: 0; font-size: 12px; cursor: pointer; font-variant-numeric: tabular-nums; }
 .nav-item.answered { background: var(--app-accent); color: white; }
-.nav-item.unanswered { background: #eeeef2; color: var(--app-text-secondary); }
-.nav-item:hover { opacity: 0.8; }
-.nav-legend { display: flex; align-items: center; font-size: 11px; color: #909399; margin-bottom: 6px; }
-.legend-dot { width: 10px; height: 10px; border-radius: 2px; margin-right: 3px; display: inline-block; }
-.legend-dot.answered { background: var(--app-accent); }
-.legend-dot.unanswered { background: #DCDFE6; }
-.nav-stats { text-align: center; font-size: 13px; color: #409EFF; font-weight: bold; }
-.exam-main { flex: 1; min-width: 0; }
-.exam-header { display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; }
-.timer { font-size: 20px; font-weight: bold; color: #409EFF; display: flex; align-items: center; gap: 6px; }
-.timer.urgent { color: #F56C6C; animation: pulse 1s infinite; }
-@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
-.q-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
-.q-num { font-weight: bold; color: #409EFF; }
-.q-score { color: #909399; font-size: 13px; }
-.q-title { font-size: 16px; margin-bottom: 12px; line-height: 1.6; }
-.options { display: flex !important; flex-direction: column; align-items: flex-start; gap: 10px; width: 100%; }
-.option-item { margin: 0 !important; margin-left: 0 !important; }
-.options :deep(.el-radio), .options :deep(.el-checkbox) { width: 100%; height: auto; min-height: 44px; padding: 12px; border: 1px solid var(--app-border); border-radius: 9px; margin: 0; }
-.options :deep(.is-checked) { border-color: var(--app-accent); background: var(--app-accent-soft); }
-.options :deep(.el-radio__label), .options :deep(.el-checkbox__label) { white-space: normal; overflow-wrap: anywhere; line-height: 1.65; }
+.nav-item.unanswered { background: #f0f2f6; color: var(--app-text-secondary); }
+.nav-item:hover { box-shadow: inset 0 0 0 1px var(--app-accent); }
+.nav-legend { display: flex; align-items: center; font-size: 11px; color: var(--app-text-secondary); }
+.legend-dot { width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; display: inline-block; }
+.legend-dot.answered { background: var(--app-accent); } .legend-dot.unanswered { background: #e0e5ed; }
+.nav-save-note { color: var(--app-text-secondary); font-size: 11px; margin: 16px 0 0; }
+.mobile-nav-toggle { display: none; }
+.exam-main { min-width: 0; }
+.exam-header { margin-bottom: 24px; }
+.exam-header h2 { font-size: 21px; line-height: 1.6; overflow-wrap: anywhere; margin: 0 0 8px; }
+.exam-header .el-text { font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.q-header { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; }
+.q-num { font-size: 12px; color: var(--app-text-secondary); }
+.q-score { margin-left: auto; color: var(--app-text-secondary); font-size: 12px; }
+.q-title { font-size: 15px; margin-bottom: 20px; line-height: 1.8; white-space: pre-wrap; overflow-wrap: anywhere; }
+.options { display: grid !important; gap: 10px; width: 100%; }
+.options :deep(.el-radio), .options :deep(.el-checkbox) { width: 100%; height: auto; min-height: 52px; padding: 12px 14px; border: 2px solid #e2e7ee; border-radius: 9px; margin: 0; align-items: flex-start; background: #f8f9fb; }
+.options :deep(.el-radio:not(.is-disabled):hover), .options :deep(.el-checkbox:not(.is-disabled):hover) { border-color: #829dbf; }
+.options :deep(.el-radio.is-checked), .options :deep(.el-checkbox.is-checked), .options :deep(.is-checked:not(.is-disabled):hover) { border-color: var(--app-selection-border); background: var(--app-selection-bg); }
+.options :deep(.el-radio__input), .options :deep(.el-checkbox__input) { margin-top: 5px; }
+.options :deep(.el-radio__label), .options :deep(.el-checkbox__label) { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: start; gap: 10px; width: 100%; white-space: normal; overflow-wrap: anywhere; line-height: 1.8; min-width: 0; color: #25364d; }
+.options :deep(.is-checked .el-radio__label), .options :deep(.is-checked .el-checkbox__label) { color: var(--app-selection-ink); font-weight: 600; }
+.options :deep(.el-radio:has(input:focus-visible)), .options :deep(.el-checkbox:has(input:focus-visible)) { outline: 3px solid #183e78; outline-offset: 3px; }
+.option-copy { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 540px) { .options :deep(.el-radio__label), .options :deep(.el-checkbox__label) { grid-template-columns: minmax(0,1fr); gap: 7px; } }
 .questions-area .el-card { scroll-margin-top: 100px; }
-@media (max-width: 767px) {
-  .exam-layout { flex-direction: column; gap: 20px; }
-  .progress-nav { position: static; width: 100%; max-height: none; }
-  .nav-grid { grid-template-columns: repeat(auto-fill, minmax(32px, 1fr)); }
-  .nav-item { width: 100%; min-height: 36px; }
-  .exam-main { width: 100%; }
-  .timer { font-size: 16px; }
+.exam-submit-bar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; padding: 18px 20px; background: white; border: 1px solid var(--app-border); border-radius: 12px; }
+.exam-submit-bar > span { font-size: 12px; color: var(--app-text-secondary); }
+@media (max-width: 900px) {
+  .exam-layout { grid-template-columns: minmax(0,1fr); gap: 20px; }
+  /* Below the app's header, above the answer cards, below dialogs/popovers. */
+  .progress-nav { position: sticky; top: 76px; z-index: 3; width: 100%; max-height: 50dvh; padding: 12px 16px; display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 8px 14px; }
+  .nav-title { margin: 0; align-items: center; justify-content: flex-start; gap: 12px; }
+  .timer { margin: 0; padding: 0; border: 0; grid-column: 2; grid-row: 1 / 3; align-content: center; gap: 0; text-align: right; }
+  .timer > strong { font-size: 22px; }
+  .mobile-nav-toggle { display: inline-block; justify-self: start; padding: 0; color: var(--app-accent); border: 0; background: transparent; font-size: 12px; }
+  .nav-grid, .nav-legend, .nav-save-note { display: none; }
+  .nav-grid.is-open { display: grid; grid-column: 1 / -1; grid-template-columns: repeat(auto-fill,minmax(32px,1fr)); margin: 8px 0 0; }
+  .nav-legend.is-open { display: flex; grid-column: 1 / -1; }
+  .questions-area .el-card { scroll-margin-top: 180px; }
 }
+@media (max-width: 767px) { .progress-nav { top: 64px; } .exam-header h2 { font-size: 18px; } }
 </style>

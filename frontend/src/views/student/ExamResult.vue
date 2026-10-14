@@ -1,184 +1,87 @@
 <template>
-  <div v-loading="loading">
-    <el-result v-if="!loading && loadError" icon="error" title="考试结果加载失败" sub-title="请检查网络或后端服务后重试">
-      <template #extra>
-        <el-button type="primary" @click="load">重新加载</el-button>
-      </template>
-    </el-result>
-
-    <el-result v-else-if="!loading && !record" icon="info" title="暂无考试记录" sub-title="您还未参加该考试">
-      <template #extra>
-        <el-button type="primary" @click="$router.push(`/exams/${examId}/take`)">参加考试</el-button>
-      </template>
-    </el-result>
-
-    <template v-else-if="record">
-      <el-card style="margin-bottom:16px">
-        <el-descriptions :title="`考试结果 - ${exam?.title || ''}`" :column="3" border>
-          <el-descriptions-item label="得分">
-            <span v-if="record.status === 'in_progress'" style="font-size:16px;color:#909399">
-              尚未提交
-            </span>
-            <span v-else-if="!record.result_released" style="font-size:16px;color:#909399">
-              成绩暂未公布
-            </span>
-            <span v-else-if="record.essay_graded" style="font-size:24px;font-weight:bold;color:#409EFF">
-              {{ record.total_score ?? '-' }}
-            </span>
-            <span v-else style="font-size:16px;color:#E6A23C">
-              {{ objectiveScore }}
-              <span style="font-size:12px;color:#909399">（主观题待批改，暂不计入总分）</span>
-            </span>
-          </el-descriptions-item>
-          <el-descriptions-item label="状态">
-            <el-tag :type="resultStatus.type">
-              {{ resultStatus.text }}
-            </el-tag>
-          </el-descriptions-item>
-          <el-descriptions-item label="提交时间">
-            {{ formatAppDateTime(record.submitted_at) }}
-          </el-descriptions-item>
-        </el-descriptions>
+  <div class="workflow-page exam-result">
+    <div class="workflow-context"><el-button link :icon="Back" @click="$router.push(store.isStudent ? '/my-records' : '/exams')">{{ store.isStudent ? '返回我的成绩' : '返回考试列表' }}</el-button></div>
+    <el-skeleton v-if="loading" :rows="7" animated />
+    <el-result v-else-if="loadError" icon="error" title="考试结果加载失败" sub-title="请检查网络或后端服务后重试"><template #extra><el-button type="primary" @click="load">重新加载</el-button></template></el-result>
+    <el-result v-else-if="!record" icon="info" title="暂无考试记录" sub-title="你还未参加该考试"><template #extra><el-button type="primary" @click="$router.push('/exams/' + examId + '/take')">参加考试</el-button></template></el-result>
+    <template v-else>
+      <el-card><template #header><div class="workflow-heading"><div><h2>{{ exam?.title || '考试结果' }}</h2><p class="workflow-caption">回顾本次作答，了解知识掌握情况</p></div><el-tag :type="resultStatus.tone">{{ resultStatus.label }}</el-tag></div></template>
+        <div class="result-overview"><div class="result-score"><span class="workflow-secondary">{{ record.result_released && !record.essay_graded ? '客观题得分' : '本次成绩' }}</span><strong :class="{ 'is-message': typeof displayedScore !== 'number' }">{{ displayedScore }}<small v-if="typeof displayedScore === 'number'"> 分</small></strong><span class="workflow-secondary">卷面满分 {{ exam?.total_score ?? '未提供' }} 分 · 及格 {{ exam?.pass_score ?? '未提供' }} 分</span></div><div class="result-facts"><div><span>提交时间</span><strong>{{ formatAppDateTime(record.submitted_at) }}</strong></div><div><span>成绩状态</span><strong>{{ resultNote }}</strong></div></div></div>
+        <div class="result-links workflow-actions"><el-button v-if="record.status === 'in_progress'" type="primary" @click="$router.push('/exams/' + examId + '/take')">继续考试</el-button><el-button v-else-if="record.result_released" @click="$router.push('/exams/' + examId + '/leaderboard')">查看排行榜</el-button></div>
       </el-card>
-
-      <el-card style="margin-bottom:16px">
-        <template #header>答题详情</template>
-        <div
-          v-for="(row, idx) in answerRows"
-          :key="row.question_id"
-          style="border:1px solid #EBEEF5;border-radius:6px;padding:14px;margin-bottom:12px"
-        >
-          <div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:8px">
-            <span style="flex-shrink:0;font-weight:bold;color:#606266">{{ idx + 1 }}.</span>
-            <span style="flex:1">{{ row.title }}</span>
-            <el-tag size="small" :type="typeTag(row.type)" style="flex-shrink:0">{{ typeLabel(row.type) }}</el-tag>
-            <el-tag v-if="record.result_released && row.is_correct === 'Y'" type="success" size="small">正确</el-tag>
-            <el-tag v-else-if="record.result_released && row.is_correct === 'N'" type="danger" size="small">错误</el-tag>
-            <el-tag v-else-if="record.result_released && row.is_correct === 'P' && row.type === 'essay' && !record.essay_graded" type="warning" size="small">待批改</el-tag>
-            <el-tag v-else-if="record.result_released && row.is_correct === 'P' && row.type === 'essay'" type="warning" size="small">部分得分</el-tag>
-            <el-tag v-else-if="record.result_released && row.is_correct === 'P'" type="warning" size="small">部分正确</el-tag>
-            <span v-if="record.result_released" style="flex-shrink:0;font-size:13px;color:#409EFF;font-weight:bold">
-              <template v-if="row.score_got !== null">{{ row.score_got }}/{{ row.max_score }}分</template>
-              <template v-else><span style="color:#E6A23C">待批改</span></template>
-            </span>
-            <el-button
-              v-if="store.isStudent && record.result_released && row.is_correct === 'N' && row.user_answer"
-              link
-              :type="wrongBookIds.has(row.question_id) ? 'warning' : 'info'"
-              size="small"
-              style="flex-shrink:0"
-              @click="toggleWrong(row.question_id)"
-            >{{ wrongBookIds.has(row.question_id) ? '移出错题本' : '加入错题本' }}</el-button>
-          </div>
-          <div style="font-size:13px;color:#606266;line-height:1.8;padding-left:18px">
-            <div><span style="color:#909399">我的答案：</span>{{ row.user_answer || '（未作答）' }}</div>
-            <div v-if="record.result_released && row.correct_answer != null">
-              <span style="color:#909399">正确答案：</span>
-              <span :style="row.is_correct !== 'Y' ? 'color:#67C23A;font-weight:bold' : ''">{{ row.correct_answer }}</span>
-            </div>
-            <div v-if="record.result_released && row.explanation" style="margin-top:4px;background:#F5F7FA;padding:6px 10px;border-radius:4px">
-              <span style="color:#909399">解析：</span>{{ row.explanation }}
-            </div>
-          </div>
-        </div>
+      <el-card><template #header><div class="workflow-heading"><h2>答题详情<span class="workflow-count">{{ answerRows.length }} 题</span></h2><span v-if="!record.result_released" class="workflow-secondary">答案与解析将在成绩公布后显示</span></div></template>
+        <el-alert v-if="wrongBookError" class="workflow-error" type="warning" :closable="false" title="错题本状态加载失败，暂时不可操作"><el-button link type="primary" @click="loadWrongIds">重试</el-button></el-alert>
+        <AnswerReview v-for="(row, index) in answerRows" :key="row.question_id" :question="row" :index="index" :reveal-answers="!!record.result_released" :pending="row.question_type === 'essay' && !record.essay_graded">
+          <template v-if="store.isStudent && record.result_released && row.is_correct === 'N' && row.user_answer"><span class="workflow-secondary">将这道题加入复习计划</span><el-button link :type="wrongBookIds.has(row.question_id) ? 'info' : 'primary'" :disabled="wrongBookError || wrongBusy.has(row.question_id)" @click="toggleWrong(row.question_id)">{{ wrongBookIds.has(row.question_id) ? '移出错题本' : '加入错题本' }}</el-button></template>
+        </AnswerReview>
+        <el-empty v-if="!answerRows.length" :image-size="64" description="暂无答题明细" />
       </el-card>
-
-      <el-button v-if="record.status === 'in_progress'" type="primary" @click="$router.push(`/exams/${examId}/take`)">继续考试</el-button>
-      <el-button v-else-if="record.result_released" type="primary" plain @click="$router.push(`/exams/${examId}/leaderboard`)">查看排行榜</el-button>
     </template>
   </div>
 </template>
-
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import { Back } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
-
 import { examApi, studentApi } from '@/api'
 import { useUserStore } from '@/stores/user'
 import { formatAppDateTime } from '@/utils/examTime'
-
-const route = useRoute()
-const store = useUserStore()
-const examId = computed(() => route.params.id)
-const requestedRecordId = computed(() => route.query.recordId)
-const loading = ref(true)
-const exam = ref(null)
-const record = ref(null)
-const wrongBookIds = ref(new Set())
-const loadError = ref(false)
-
-const resultStatus = computed(() => {
-  if (record.value?.status === 'in_progress') return { type: 'primary', text: '进行中' }
-  if (record.value?.status === 'submitted' || !record.value?.essay_graded) return { type: 'warning', text: '主观题待批改' }
-  if (!record.value?.result_released) return { type: 'info', text: '成绩暂未公布' }
-  return { type: 'success', text: '已出分' }
-})
-
-function typeTag(type) {
-  return { single: '', multiple: 'warning', truefalse: 'success', essay: 'info' }[type] || ''
+import { recordState, reviewQuestion } from '@/utils/examPresentation'
+import AnswerReview from '@/components/lists/AnswerReview.vue'
+import '@/styles/workflow.css'
+const route = useRoute(), store = useUserStore()
+const examId = computed(() => route.params.id), requestedRecordId = computed(() => route.query.recordId)
+const loading = ref(true), loadError = ref(false), exam = ref(null), record = ref(null)
+const wrongBookIds = ref(new Set()), wrongBusy = ref(new Set()), wrongBookError = ref(false)
+let requestId = 0, wrongRequestId = 0, disposed = false
+const resultStatus = computed(() => recordState(record.value || {}))
+const answerRows = computed(() => (record.value?.answers || record.value?.questions || []).map(reviewQuestion))
+const objectiveScore = computed(() => answerRows.value.filter(row => row.question_type !== 'essay').reduce((sum, row) => sum + (row.score_got ?? 0), 0))
+const displayedScore = computed(() => record.value?.status === 'in_progress' ? '尚未提交' : !record.value?.result_released ? '暂未公布' : record.value?.essay_graded ? (record.value.total_score ?? '未提供') : objectiveScore.value)
+const resultNote = computed(() => record.value?.status === 'in_progress' ? '考试尚未提交，可以继续作答' : !record.value?.essay_graded ? '主观题待批改，当前成绩并非最终成绩' : !record.value?.result_released ? '成绩暂未公布，请等待考试结束' : '成绩已公布，可查看答案与解析')
+async function loadWrongIds() {
+  const version = ++wrongRequestId
+  wrongBookError.value = true
+  try { const response = await studentApi.wrongBookIds(); if (version === wrongRequestId && !disposed) { wrongBookIds.value = new Set(response.ids || []); wrongBookError.value = false } }
+  catch { /* Disable actions until the server's membership state is known. */ }
 }
-
-function typeLabel(type) {
-  return { single: '单选', multiple: '多选', truefalse: '判断', essay: '简答' }[type] || type
-}
-
-const answerRows = computed(() => {
-  const answers = record.value?.answers || record.value?.questions
-  if (!answers) return []
-  return answers.map((answer) => ({
-    ...answer,
-    title: answer.question_title || answer.title || `题目#${answer.question_id}`,
-    type: answer.question_type || '',
-    max_score: answer.max_score ?? answer.score ?? '-',
-    correct_answer: answer.correct_answer ?? answer.answer ?? null,
-    explanation: answer.explanation || '',
-  }))
-})
-
-const objectiveScore = computed(() => {
-  return answerRows.value
-    .filter((answer) => answer.type !== 'essay')
-    .reduce((sum, answer) => sum + (answer.score_got ?? 0), 0)
-})
-
-async function toggleWrong(questionId) {
-  if (wrongBookIds.value.has(questionId)) {
-    await studentApi.removeWrong(questionId)
-    wrongBookIds.value.delete(questionId)
-    ElMessage.success('已从错题本移出')
-  } else {
-    await studentApi.addWrong(questionId)
-    wrongBookIds.value.add(questionId)
-    ElMessage.success('已加入错题本')
-  }
-  wrongBookIds.value = new Set(wrongBookIds.value)
-}
-
-async function load() {
-  loading.value = true
-  loadError.value = false
+async function toggleWrong(id) {
+  if (wrongBookError.value || wrongBusy.value.has(id) || !store.isStudent || !record.value?.result_released) return
+  wrongBusy.value.add(id)
   try {
-    const recordRequest = requestedRecordId.value
-      ? examApi.record(examId.value, requestedRecordId.value)
-      : examApi.myRecord(examId.value)
-    const [examInfo, response] = await Promise.all([
-      examApi.get(examId.value),
-      recordRequest,
-    ])
+    if (wrongBookIds.value.has(id)) { await studentApi.removeWrong(id); wrongBookIds.value.delete(id); ElMessage.success('已从错题本移出') }
+    else { await studentApi.addWrong(id); wrongBookIds.value.add(id); ElMessage.success('已加入错题本') }
+  } catch { /* Retain the previous membership on request failure. */ }
+  finally { wrongBusy.value.delete(id) }
+}
+async function load() {
+  const version = ++requestId
+  ++wrongRequestId
+  loading.value = true; loadError.value = false
+  wrongBookIds.value = new Set()
+  try {
+    const [examInfo, response] = await Promise.all([examApi.get(examId.value), requestedRecordId.value ? examApi.record(examId.value, requestedRecordId.value) : examApi.myRecord(examId.value)])
+    if (version !== requestId || disposed) return
     exam.value = examInfo
     record.value = requestedRecordId.value ? response : (response?.exists ? response : null)
-
-    if (store.isStudent && record.value?.result_released) {
-      const response = await studentApi.wrongBookIds().catch(() => ({ ids: [] }))
-      wrongBookIds.value = new Set(response.ids || [])
-    }
-  } catch {
-    loadError.value = true
-  } finally {
-    loading.value = false
-  }
+    if (store.isStudent && record.value?.result_released) await loadWrongIds()
+  } catch { if (version === requestId && !disposed) loadError.value = true }
+  finally { if (version === requestId && !disposed) loading.value = false }
 }
-
-onMounted(load)
+watch([examId, requestedRecordId], load, { immediate: true })
+onBeforeUnmount(() => { disposed = true; ++requestId; ++wrongRequestId })
 </script>
+<style scoped>
+.result-overview { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1.3fr); gap: 32px; align-items: center; }
+.result-score { display: grid; gap: 10px; }
+.result-score > strong { font-size: 40px; line-height: 1.4; font-weight: 600; letter-spacing: -1px; font-variant-numeric: tabular-nums; }
+.result-score > strong.is-message { font-size: 26px; letter-spacing: 0; }
+.result-score small { font-size: 13px; font-weight: 400; color: var(--app-text-secondary); }
+.result-facts { display: grid; gap: 20px; }
+.result-facts > div { display: grid; gap: 7px; font-size: 13px; }
+.result-facts span { color: var(--app-text-secondary); font-size: 12px; }
+.result-facts strong { font-weight: 400; overflow-wrap: anywhere; }
+.result-links:empty { display: none; } .result-links { margin-top: 24px; }
+@media (max-width: 767px) { .result-overview { grid-template-columns: minmax(0,1fr); gap: 24px; } .result-facts { padding-top: 20px; border-top: 1px solid var(--app-border); } }
+</style>

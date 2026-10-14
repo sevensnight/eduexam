@@ -1,121 +1,55 @@
 <template>
-  <el-card :header="isEdit ? '编辑题目' : '新建题目'">
-    <el-form :model="form" :rules="rules" ref="formRef" label-width="100px" style="max-width:800px">
-      <el-form-item label="题目类型" prop="question_type">
-        <el-radio-group v-model="form.question_type" @change="handleQuestionTypeChange">
-          <el-radio value="single">单选题</el-radio>
-          <el-radio value="multiple">多选题</el-radio>
-          <el-radio value="truefalse">判断题</el-radio>
-          <el-radio value="essay">简答题</el-radio>
-        </el-radio-group>
-      </el-form-item>
-      <el-form-item label="题目内容" prop="title">
-        <el-input v-model="form.title" type="textarea" :rows="3" placeholder="输入题目内容" />
-      </el-form-item>
-      <el-form-item label="难度" prop="difficulty">
-        <el-radio-group v-model="form.difficulty">
-          <el-radio value="easy">简单</el-radio>
-          <el-radio value="medium">中等</el-radio>
-          <el-radio value="hard">困难</el-radio>
-        </el-radio-group>
-      </el-form-item>
-      <el-form-item label="所属分类">
-        <el-select v-model="form.category_id" placeholder="选择分类" clearable style="width:240px">
-          <el-option v-for="c in flatCategories" :key="c.id" :label="c.label" :value="c.id" />
-        </el-select>
-      </el-form-item>
-
-      <!-- 选择题选项 -->
-      <template v-if="form.question_type === 'single' || form.question_type === 'multiple'">
-        <el-form-item label="选项">
-          <div v-for="(opt, idx) in options" :key="idx" style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
-            <el-tag style="flex-shrink:0;width:32px;text-align:center;line-height:32px;margin-left:8px">{{ String.fromCharCode(65 + idx) }}</el-tag>
-            <el-input v-model="options[idx]" placeholder="选项内容" style="flex:1" />
-            <el-button
-              circle
-              :icon="Close"
-              :aria-label="`删除选项 ${optionLetter(idx)}`"
-              @click="removeOption(idx)"
-              type="danger"
-              plain
-              size="small"
-              style="flex-shrink:0;margin-left:-8px"
-            />
-          </div>
-          <div style="margin-top:4px;margin-left:52px">
-            <el-button @click="options.push('')" :icon="Plus">添加选项</el-button>
-          </div>
-        </el-form-item>
-        <el-form-item label="正确答案" prop="answer">
-          <template v-if="form.question_type === 'single'">
-            <el-radio-group v-model="form.answer">
-              <el-radio v-for="(_, idx) in options" :key="idx" :value="String.fromCharCode(65 + idx)">
-                {{ String.fromCharCode(65 + idx) }}
-              </el-radio>
-            </el-radio-group>
-          </template>
-          <template v-else>
-            <el-checkbox-group v-model="multiAnswers">
-              <el-checkbox v-for="(_, idx) in options" :key="idx" :value="String.fromCharCode(65 + idx)">
-                {{ String.fromCharCode(65 + idx) }}
-              </el-checkbox>
-            </el-checkbox-group>
-          </template>
-        </el-form-item>
-      </template>
-
-      <!-- 判断题 -->
-      <el-form-item v-if="form.question_type === 'truefalse'" label="正确答案" prop="answer">
-        <el-radio-group v-model="form.answer">
-          <el-radio value="True">正确</el-radio>
-          <el-radio value="False">错误</el-radio>
-        </el-radio-group>
-      </el-form-item>
-
-      <!-- 简答题参考答案 -->
-      <el-form-item v-if="form.question_type === 'essay'" label="参考答案" prop="answer">
-        <el-input v-model="form.answer" type="textarea" :rows="4" placeholder="参考答案（用于评分参考）" />
-      </el-form-item>
-
-      <el-form-item label="解析">
-        <el-input v-model="form.explanation" type="textarea" :rows="2" placeholder="题目解析（可选）" />
-      </el-form-item>
-      <el-form-item label="标签">
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-          <el-select v-model="form.tag_ids" multiple placeholder="选择标签" style="flex:1;min-width:200px">
-            <el-option v-for="t in allTags" :key="t.id" :label="t.name" :value="t.id">
-              <el-tag size="small" :style="{ background: t.color+'22', color: t.color, borderColor: t.color }">{{ t.name }}</el-tag>
-            </el-option>
-          </el-select>
-          <el-popover placement="bottom" :width="260" trigger="click" v-model:visible="newTagPopover">
-            <template #reference>
-              <el-button :icon="Plus">新建标签</el-button>
-            </template>
-            <div style="display:flex;flex-direction:column;gap:10px">
-              <el-input v-model="newTagName" placeholder="标签名称" size="small" />
-              <div style="display:flex;align-items:center;gap:8px">
-                <span style="font-size:13px;color:#606266">颜色</span>
-                <el-color-picker v-model="newTagColor" size="small" />
-              </div>
-              <el-button type="primary" size="small" @click="createNewTag">确认添加</el-button>
+  <div class="workflow-page question-editor">
+    <div class="workflow-context"><el-button text :icon="ArrowLeft" @click="$router.push('/questions')">返回题库</el-button><span class="workflow-secondary">{{ isEdit ? '编辑题目' : '新建题目' }}</span></div>
+    <el-skeleton v-if="pageLoading" :rows="10" animated />
+    <el-result v-else-if="loadError" icon="error" title="题目编辑器加载失败" sub-title="请重新加载后再编辑，避免覆盖未加载的内容"><template #extra><el-button @click="initialize">重新加载</el-button></template></el-result>
+    <el-form v-else ref="formRef" class="workflow-form" :model="form" :rules="rules" label-position="top" :disabled="loading" @submit.prevent="submit">
+      <el-card>
+        <template #header><div class="workflow-heading"><div><h2>题目内容</h2><p class="workflow-caption">设置题型、题干与正确答案</p></div></div></template>
+        <el-form-item label="题目类型" prop="question_type"><el-radio-group v-model="form.question_type" @change="handleQuestionTypeChange"><el-radio value="single">单选题</el-radio><el-radio value="multiple">多选题</el-radio><el-radio value="truefalse">判断题</el-radio><el-radio value="essay">简答题</el-radio></el-radio-group></el-form-item>
+        <el-form-item label="题目内容" prop="title"><el-input v-model="form.title" type="textarea" :autosize="{ minRows: 3, maxRows: 12 }" placeholder="输入完整题干" /></el-form-item>
+        <template v-if="['single', 'multiple'].includes(form.question_type)">
+          <el-form-item label="选项"><div class="question-options">
+            <div v-for="(_, index) in options" :key="index" class="question-option">
+              <span class="option-letter">{{ optionLetter(index) }}</span>
+              <el-input v-model="options[index]" type="textarea" :autosize="{ minRows: 1, maxRows: 6 }" :aria-label="'选项 ' + optionLetter(index)" placeholder="输入选项内容" />
+              <el-button text :icon="Close" :aria-label="'删除选项 ' + optionLetter(index)" :disabled="options.length <= 2" @click="removeOption(index)" />
             </div>
-          </el-popover>
+            <el-button :icon="Plus" :disabled="options.length >= 26" @click="options.push('')">添加选项</el-button>
+          </div></el-form-item>
+          <el-form-item label="正确答案" prop="answer">
+            <el-radio-group v-if="form.question_type === 'single'" v-model="form.answer"><el-radio v-for="(_, index) in options" :key="index" :value="optionLetter(index)">{{ optionLetter(index) }}</el-radio></el-radio-group>
+            <el-checkbox-group v-else v-model="multiAnswers"><el-checkbox v-for="(_, index) in options" :key="index" :value="optionLetter(index)">{{ optionLetter(index) }}</el-checkbox></el-checkbox-group>
+          </el-form-item>
+        </template>
+        <el-form-item v-if="form.question_type === 'truefalse'" label="正确答案" prop="answer"><el-radio-group v-model="form.answer"><el-radio value="True">正确</el-radio><el-radio value="False">错误</el-radio></el-radio-group></el-form-item>
+        <el-form-item v-if="form.question_type === 'essay'" label="参考答案" prop="answer"><el-input v-model="form.answer" type="textarea" :autosize="{ minRows: 3, maxRows: 12 }" placeholder="输入评分参考答案" /></el-form-item>
+        <el-form-item label="题目解析（可选）"><el-input v-model="form.explanation" type="textarea" :autosize="{ minRows: 3, maxRows: 12 }" placeholder="说明解题思路、关键知识点或易错原因" /></el-form-item>
+      </el-card>
+      <el-card>
+        <template #header><div class="workflow-heading"><div><h2>分类与标签</h2><p class="workflow-caption">便于检索、组卷和统计分析</p></div></div></template>
+        <div class="form-grid">
+          <el-form-item label="所属分类"><el-select v-model="form.category_id" placeholder="选择分类" clearable filterable><el-option v-for="category in flatCategories" :key="category.id" :label="category.label" :value="category.id" /></el-select></el-form-item>
+          <el-form-item label="难度" prop="difficulty"><el-radio-group v-model="form.difficulty"><el-radio value="easy">简单</el-radio><el-radio value="medium">中等</el-radio><el-radio value="hard">困难</el-radio></el-radio-group></el-form-item>
+          <el-form-item class="form-wide" label="标签">
+            <div class="question-tags"><el-select v-model="form.tag_ids" multiple filterable placeholder="选择标签"><el-option v-for="tag in allTags" :key="tag.id" :label="tag.name" :value="tag.id" /></el-select>
+              <el-popover placement="bottom-end" :width="260" trigger="click" v-model:visible="newTagPopover"><template #reference><el-button :icon="Plus">新建标签</el-button></template>
+                <div class="new-tag-form"><el-input v-model="newTagName" placeholder="标签名称" :disabled="tagSaving" /><div><span>标签颜色</span><el-color-picker v-model="newTagColor" :disabled="tagSaving" /></div><el-button type="primary" :loading="tagSaving" @click="createNewTag">确认添加</el-button></div>
+              </el-popover>
+            </div>
+          </el-form-item>
         </div>
-      </el-form-item>
-
-      <el-form-item>
-        <el-button type="primary" :loading="loading" @click="submit">保存题目</el-button>
-        <el-button @click="$router.back()">取消</el-button>
-      </el-form-item>
+      </el-card>
+      <footer class="workflow-footer"><span class="workflow-secondary">保存后可在题库中检索与组卷</span><div class="workflow-actions"><el-button @click="$router.push('/questions')">取消</el-button><el-button type="primary" native-type="submit" :loading="loading">保存题目</el-button></div></footer>
     </el-form>
-  </el-card>
+  </div>
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Plus, Close } from '@element-plus/icons-vue'
+import { Plus, Close, ArrowLeft } from '@element-plus/icons-vue'
 import { questionApi, categoryApi, tagApi } from '@/api'
 import {
   optionLetter,
@@ -125,11 +59,17 @@ import {
   serializeOptions,
   validateChoiceQuestion,
 } from '@/utils/questionEditor'
+import '@/styles/workflow.css'
 
 const route = useRoute()
 const router = useRouter()
 const formRef = ref()
 const loading = ref(false)
+const pageLoading = ref(true)
+const loadError = ref(false)
+const tagSaving = ref(false)
+let requestVersion = 0
+let disposed = false
 const isEdit = computed(() => !!route.params.id)
 const options = ref(['', '', '', ''])
 const multiAnswers = ref([])
@@ -141,13 +81,20 @@ const newTagColor = ref('#409EFF')
 const previousQuestionType = ref('single')
 
 async function createNewTag() {
-  if (!newTagName.value) return
-  const tag = await tagApi.create(newTagName.value, newTagColor.value)
-  allTags.value = await tagApi.list().catch(() => allTags.value)
-  if (tag?.id) form.value.tag_ids.push(tag.id)
-  newTagName.value = ''
-  newTagColor.value = '#409EFF'
-  newTagPopover.value = false
+  const name = newTagName.value.trim()
+  if (!name || tagSaving.value) return
+  tagSaving.value = true
+  try {
+    const tag = await tagApi.create(name, newTagColor.value)
+    allTags.value = await tagApi.list().catch(() => allTags.value)
+    if (tag?.id) {
+      if (!allTags.value.some(item => item.id === tag.id)) allTags.value.push(tag)
+      if (!form.value.tag_ids.includes(tag.id)) form.value.tag_ids.push(tag.id)
+    }
+    newTagName.value = ''
+    newTagPopover.value = false
+  } catch { /* 接口层已提示错误，保留输入以便重试。 */ }
+  finally { tagSaving.value = false }
 }
 
 const form = ref({
@@ -175,7 +122,7 @@ const flatCategories = computed(() => {
 })
 
 watch(multiAnswers, (vals) => {
-  form.value.answer = [...vals].sort().join(',')
+  if (form.value.question_type === 'multiple') form.value.answer = [...vals].sort().join(',')
 }, { deep: true })
 
 function handleQuestionTypeChange(type) {
@@ -220,8 +167,9 @@ function removeOption(index) {
 }
 
 async function submit() {
+  if (loading.value || pageLoading.value || loadError.value) return
   const valid = await formRef.value.validate().catch(() => false)
-  if (!valid) return
+  if (!valid || loading.value) return
   const choiceError = validateChoiceQuestion(
     form.value.question_type,
     options.value,
@@ -250,32 +198,55 @@ async function submit() {
       ElMessage.success('创建成功')
     }
     router.push('/questions')
-  } finally {
+  } catch { /* 保存失败时保留编辑内容。 */ }
+  finally {
     loading.value = false
   }
 }
 
-onMounted(async () => {
-  const [cats, tags] = await Promise.all([
-    categoryApi.list().catch(() => []),
-    tagApi.list().catch(() => []),
-  ])
-  allCategories.value = cats
-  allTags.value = tags
-
-  if (isEdit.value) {
-    const q = await questionApi.get(route.params.id)
-    form.value = {
-      title: q.title, question_type: q.question_type, difficulty: q.difficulty,
-      answer: q.answer, explanation: q.explanation || '', category_id: q.category_id,
-      tag_ids: (q.tags || []).map(t => t.id), options: null,
-    }
-    previousQuestionType.value = q.question_type
-    const parsedOptions = parseOptionList(q.options)
-    if (parsedOptions.length) options.value = parsedOptions
-    if (q.question_type === 'multiple' && q.answer) {
-      multiAnswers.value = parseAnswerLetters(q.answer)
-    }
-  }
-})
+async function initialize() {
+  const version = ++requestVersion
+  pageLoading.value = true
+  loadError.value = false
+  try {
+    const [cats, tags, question] = await Promise.all([
+      categoryApi.list(), tagApi.list(),
+      isEdit.value ? questionApi.get(route.params.id) : Promise.resolve(null),
+    ])
+    if (disposed || version !== requestVersion) return
+    allCategories.value = cats
+    allTags.value = tags
+    form.value = question ? {
+      title: question.title, question_type: question.question_type, difficulty: question.difficulty,
+      answer: question.answer, explanation: question.explanation || '', category_id: question.category_id,
+      tag_ids: (question.tags || []).map(tag => tag.id), options: null,
+    } : { title: '', question_type: 'single', difficulty: 'medium', options: null, answer: '', explanation: '', category_id: null, tag_ids: [] }
+    previousQuestionType.value = form.value.question_type
+    const parsedOptions = parseOptionList(question?.options)
+    options.value = parsedOptions.length ? parsedOptions : ['', '', '', '']
+    multiAnswers.value = question?.question_type === 'multiple' ? parseAnswerLetters(question.answer) : []
+  } catch { if (version === requestVersion && !disposed) loadError.value = true }
+  finally { if (version === requestVersion && !disposed) pageLoading.value = false }
+}
+watch(() => route.params.id, initialize, { immediate: true })
+onBeforeUnmount(() => { disposed = true; requestVersion++ })
 </script>
+
+<style scoped>
+.question-editor > .el-form { display: grid; gap: 20px; min-width: 0; }
+.question-editor :deep(.el-radio-group), .question-editor :deep(.el-checkbox-group) { display: flex; flex-wrap: wrap; gap: 8px; }
+.question-editor :deep(.el-radio), .question-editor :deep(.el-checkbox) { margin: 0; height: auto; min-height: 38px; padding: 7px 12px; border: 1px solid #d8e0eb; border-radius: 7px; background: #f8f9fb; }
+.question-editor :deep(.el-radio.is-checked), .question-editor :deep(.el-checkbox.is-checked) { border-color: var(--app-selection-border); box-shadow: inset 0 0 0 1px var(--app-selection-border); background: var(--app-selection-bg); }
+.question-editor :deep(.is-checked .el-radio__label), .question-editor :deep(.is-checked .el-checkbox__label) { color: var(--app-selection-ink); font-weight: 600; }
+.question-editor :deep(.el-radio:has(input:focus-visible)), .question-editor :deep(.el-checkbox:has(input:focus-visible)) { outline: 3px solid #183e78; outline-offset: 2px; }
+.question-options { display: grid; gap: 12px; width: 100%; min-width: 0; }
+.question-options > .el-button { justify-self: start; margin: 0; }
+.question-option { display: grid; grid-template-columns: 28px minmax(0,1fr) 32px; align-items: start; gap: 12px; }
+.option-letter { padding-top: 9px; text-align: center; font-weight: 600; color: var(--app-text-secondary); }
+.question-option > .el-button { padding: 0; width: 32px; }
+.question-tags { display: flex; flex-wrap: wrap; gap: 12px; width: 100%; min-width: 0; }
+.question-tags > .el-select { flex: 1 1 220px; }
+.new-tag-form { display: grid; gap: 12px; }
+.new-tag-form > div { display: flex; gap: 12px; align-items: center; }
+@media (max-width: 540px) { .question-option { grid-template-columns: 20px minmax(0,1fr) 28px; gap: 8px; } }
+</style>

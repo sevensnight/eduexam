@@ -11,6 +11,16 @@
   --app-shadow: none;
   --app-accent: #0066cc;
   --app-accent-soft: #edf4fc;
+  /* 选择状态与轻量悬停底色分开，跨页面共享清晰的状态对比。 */
+  --app-selection-bg: #e6efff;
+  --app-selection-border: #2165c6;
+  --app-selection-ink: #164a94;
+  --app-answer-correct: #217346;
+  --app-answer-correct-bg: #e8f5ec;
+  --app-answer-wrong: #b52d34;
+  --app-answer-wrong-bg: #fff0ef;
+  --app-answer-missed: #895b00;
+  --app-answer-missed-bg: #fff5df;
   --app-subtle: #fafafa;
   --el-color-primary: #0066cc;
   --el-color-primary-light-3: #4d94db;
@@ -53,6 +63,8 @@ a:hover { text-decoration: underline; }
 button { cursor: pointer; }
 button:disabled { cursor: not-allowed; }
 :focus-visible { outline: 3px solid #0066cc80; outline-offset: 3px; }
+/* 下拉框由外层 wrapper 提示焦点，避免内部输入区出现第二圈矩形描边。 */
+.el-select__input:focus-visible { outline: none; }
 h1, h2, h3, p { margin-top: 0; }
 h1, h2, h3 { font-weight: 600; letter-spacing: -.035em; }
 h1 { font-size: clamp(26px, 3vw, 36px); line-height: 1.25; }
@@ -72,6 +84,50 @@ h2 { font-size: 23px; line-height: 1.4; }
 .el-input__wrapper, .el-select__wrapper { min-height: 38px; border-radius: 9px; box-shadow: 0 0 0 1px var(--el-border-color) inset; }
 .el-textarea__inner { border-radius: 9px; padding: 10px 12px; }
 .el-input--large .el-input__wrapper { min-height: 48px; }
+/* 数字步进器：左右独立的减 / 加按钮，保留原生组件的键盘与边界处理。 */
+.number-stepper.el-input-number {
+  --stepper-height: 40px;
+  --stepper-button-size: 30px;
+  width: 160px;
+  max-width: 100%;
+  line-height: var(--stepper-height);
+}
+.number-stepper.el-input-number--small { --stepper-height: 36px; --stepper-button-size: 26px; }
+.number-stepper.el-input-number .el-input .el-input__wrapper {
+  min-height: var(--stepper-height);
+  padding: 1px calc(var(--stepper-button-size) + 12px);
+  background: var(--app-surface);
+}
+.number-stepper.el-input-number .el-input__inner {
+  height: calc(var(--stepper-height) - 2px);
+  color: var(--app-text);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.number-stepper.el-input-number .el-input__inner:focus-visible { outline: none; }
+.number-stepper.el-input-number:focus-within .el-input .el-input__wrapper {
+  box-shadow: 0 0 0 1px var(--app-accent) inset, 0 0 0 3px var(--app-accent-soft);
+}
+.number-stepper.el-input-number .el-input-number__decrease,
+.number-stepper.el-input-number .el-input-number__increase {
+  top: 5px;
+  bottom: 5px;
+  width: var(--stepper-button-size);
+  border: 0;
+  border-radius: 6px;
+  background: var(--app-bg);
+  color: var(--el-text-color-regular);
+  font-size: 14px;
+  transition: background-color .15s, color .15s;
+}
+.number-stepper.el-input-number .el-input-number__decrease { left: 5px; }
+.number-stepper.el-input-number .el-input-number__increase { right: 5px; }
+.number-stepper.el-input-number:not(.is-disabled) [role="button"]:not(.is-disabled):hover { background: var(--app-accent-soft); color: var(--app-accent); }
+.number-stepper.el-input-number:not(.is-disabled) [role="button"]:not(.is-disabled):active { background: var(--app-selection-bg); }
+.number-stepper.el-input-number [role="button"].is-disabled,
+.number-stepper.el-input-number.is-disabled [role="button"] { background: var(--app-subtle); color: var(--el-disabled-text-color); }
+.number-stepper.el-input-number.is-disabled .el-input .el-input__wrapper { background: var(--el-disabled-bg-color); }
+.number-stepper.el-input-number.is-disabled .el-input__inner { color: var(--el-disabled-text-color); }
 .el-form-item { margin-bottom: 22px; }
 .el-form-item__label { font-weight: 500; }
 .el-form--inline { display: flex; flex-wrap: wrap; gap: 12px 16px; align-items: end; padding: 0 0 18px; border-bottom: 1px solid var(--app-border); }

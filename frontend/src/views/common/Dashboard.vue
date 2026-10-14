@@ -32,12 +32,10 @@
       <section class="dashboard-grid">
         <el-card class="recent-card" shadow="never">
           <template #header><div class="section-header"><span>最新考试</span><router-link to="/exams" class="section-link">查看全部 <el-icon><ArrowRight /></el-icon></router-link></div></template>
-          <el-table :data="recentExams.slice(0, 6)" empty-text="暂无考试，创建后即可在此查看">
-            <el-table-column prop="title" label="考试名称" min-width="190" show-overflow-tooltip />
-            <el-table-column prop="course_name" label="课程" min-width="105" show-overflow-tooltip><template #default="{ row }">{{ row.course_name || '-' }}</template></el-table-column>
-            <el-table-column label="状态" width="90"><template #default="{ row }"><el-tag :type="statusType(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag></template></el-table-column>
-            <el-table-column prop="question_count" label="题数" width="60" align="right" />
-          </el-table>
+          <ResponsiveTable :rows="recentExams.slice(0, 6)" :columns="examColumns" label="最新考试" :empty-text="store.isStudent ? '暂无考试安排' : '暂无考试，创建后即可在此查看'">
+            <template #title="{ row }"><div class="recent-exam-title">{{ row.title }}</div><div class="recent-exam-course">{{ row.course_name || '未关联课程' }}</div></template>
+            <template #status="{ row }"><el-tag :type="statusType(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag></template>
+          </ResponsiveTable>
         </el-card>
         <el-card class="category-card" shadow="never">
           <template #header>{{ store.isStudent ? '错题分类分布' : '各分类题目分布' }}</template>
@@ -78,6 +76,9 @@ import {
 } from '@element-plus/icons-vue'
 import { examApi, statsApi, tagApi, studentApi } from '@/api'
 import { useUserStore } from '@/stores/user'
+import ResponsiveTable from '@/components/lists/ResponsiveTable.vue'
+
+const examColumns = [{ key: 'title', label: '考试 / 课程' }, { key: 'status', label: '状态', width: '90px' }, { key: 'question_count', label: '题数', width: '65px' }]
 
 const store = useUserStore()
 const loading = ref(true)
@@ -161,7 +162,9 @@ onMounted(loadDashboard)
 .refresh-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; color: var(--app-text-secondary); font-size: 11px; white-space: nowrap; }
 .refresh-meta time { color: var(--app-text); font-variant-numeric: tabular-nums; }
 .welcome-date { font-size: 12px; color: var(--app-text-secondary); margin: 0 0 12px; }
-.dashboard-welcome h1 { margin: 0 0 10px; }
+.dashboard-welcome h1 { margin: 0 0 10px; overflow-wrap: anywhere; }
+.recent-exam-title { font-size: 14px; font-weight: 500; line-height: 1.6; overflow-wrap: anywhere; }
+.recent-exam-course { font-size: 12px; color: var(--app-text-secondary); margin-top: 5px; }
 .welcome-description { color: var(--app-text-secondary); font-size: 14px; margin: 0; }
 .metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); background: var(--app-surface); border: 1px solid var(--app-border); border-radius: 16px; padding: 24px 0; }
 .metric { padding: 0 28px; border-right: 1px solid var(--app-border); }

@@ -1,0 +1,48 @@
+/* Shared teacher/student workflow language, scoped away from other screens. */
+.workflow-page { min-width: 0; display: grid; gap: 20px; }
+.workflow-page .workflow-context, .workflow-page .workflow-heading { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 14px; }
+.workflow-page .workflow-context { color: var(--app-text-secondary); font-size: 13px; }
+.workflow-page .workflow-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.workflow-page .workflow-actions .el-button { margin: 0; }
+.workflow-page .workflow-heading h2 { margin: 0; font-size: 16px; font-weight: 600; overflow-wrap: anywhere; }
+.workflow-page .workflow-caption { margin: 6px 0 0; color: var(--app-text-secondary); font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
+.workflow-page .workflow-count { display: inline-block; padding: 1px 7px; margin-left: 8px; background: var(--el-fill-color-light); border-radius: 5px; color: var(--app-text-secondary); font-size: 12px; font-weight: 400; }
+.workflow-page .workflow-body { container-type: inline-size; container-name: workflow; min-width: 0; }
+.workflow-page .workflow-tools { display: flex; align-items: end; flex-wrap: wrap; gap: 14px; margin-bottom: 20px; }
+.workflow-page .workflow-field { flex: 0 1 180px; display: grid; gap: 7px; min-width: 0; }
+.workflow-page .workflow-search { flex: 1 1 240px; max-width: 440px; }
+.workflow-page .workflow-field > label { font-size: 12px; color: var(--app-text-secondary); }
+.workflow-page .workflow-title { font-size: 14px; font-weight: 500; line-height: 1.7; overflow-wrap: anywhere; white-space: pre-wrap; }
+.workflow-page .workflow-secondary { font-size: 12px; color: var(--app-text-secondary); line-height: 1.7; overflow-wrap: anywhere; }
+.workflow-page .workflow-stack { display: grid; gap: 5px; }
+.workflow-page .workflow-numeric { font-variant-numeric: tabular-nums; }
+.workflow-page .workflow-score { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--app-text); }
+.workflow-page .workflow-pagination { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; padding-top: 18px; margin-top: 16px; border-top: 1px solid var(--app-border); }
+.workflow-page .workflow-pagination .el-pagination { padding: 0; max-width: 100%; }
+.workflow-page .workflow-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); background: white; border: 1px solid var(--app-border); border-radius: 16px; overflow: hidden; }
+.workflow-page .workflow-metric { padding: 22px 24px; min-width: 0; border-right: 1px solid var(--app-border); }
+.workflow-page .workflow-metric:last-child { border: 0; }
+.workflow-page .workflow-metric span { display: block; color: var(--app-text-secondary); font-size: 12px; }
+.workflow-page .workflow-metric strong { display: block; margin: 10px 0 5px; font-size: 28px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.4; overflow-wrap: anywhere; }
+.workflow-page .workflow-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 20px; }
+.workflow-page .workflow-grid > * { min-width: 0; }
+.workflow-page .workflow-state { padding-block: 30px; }
+.workflow-page .workflow-form { min-width: 0; }
+.workflow-page .workflow-form .el-form-item { margin-bottom: 24px; }
+.workflow-page .workflow-form .el-form-item__label { font-size: 13px; }
+.workflow-page .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 0 24px; }
+.workflow-page .form-grid > * { min-width: 0; }
+.workflow-page .form-wide { grid-column: 1 / -1; }
+.workflow-page .workflow-form .el-select, .workflow-page .workflow-form .el-date-editor { width: 100%; min-width: 0; }
+.workflow-page .form-note { color: var(--app-text-secondary); font-size: 12px; line-height: 1.7; margin: 7px 0 0; }
+.workflow-page .workflow-footer { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; padding: 18px 24px; border: 1px solid var(--app-border); border-radius: 12px; background: white; }
+.workflow-page .workflow-error { margin-bottom: 18px; }
+@media (max-width: 1100px) { .workflow-page .workflow-grid { grid-template-columns: minmax(0,1fr); } }
+@media (max-width: 767px) { .workflow-page { gap: 16px; } .workflow-page .form-grid { grid-template-columns: minmax(0,1fr); } .workflow-page .workflow-metrics { grid-template-columns: repeat(2,minmax(0,1fr)); } .workflow-page .workflow-metric { padding: 16px; border-bottom: 1px solid var(--app-border); } .workflow-page .workflow-metric strong { font-size: 24px; } .workflow-page .workflow-footer { padding: 16px; } }
+@container workflow (max-width: 500px) { .workflow-page .workflow-field { flex: 1 1 140px; } .workflow-page .workflow-search { flex-basis: 100%; max-width: none; } }
+/* 日期浮层挂载在 body 下，单独限定选择器，避免影响其他页面。 */
+@media (max-width: 380px) {
+  .exam-schedule-picker.el-picker__popper .el-date-picker { width: calc(100vw - 26px); }
+  .exam-schedule-picker.el-picker__popper .el-picker-panel__content { width: auto; margin: 12px; }
+  .exam-schedule-picker.el-picker__popper .el-date-picker__time-header { table-layout: fixed; }
+}
