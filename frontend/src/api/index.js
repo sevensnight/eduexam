@@ -33,7 +33,7 @@ export const questionApi = {
 }
 
 export const examApi = {
-  list: (params) => request.get('/exams', { params }),
+  list: (params, config = {}) => request.get('/exams', { ...config, params }),
   get: (id) => request.get(`/exams/${id}`),
   create: (data) => request.post('/exams', data),
   update: (id, data) => request.put(`/exams/${id}`, data),
@@ -62,10 +62,10 @@ export const courseApi = {
 }
 
 export const statsApi = {
-  categories: () => request.get('/stats/categories'),
+  categories: (config = {}) => request.get('/stats/categories', config),
   exam: (id, config = {}) => request.get(`/stats/exam/${id}`, config),
-  insights: (id) => request.get(`/stats/exam/${id}/insights`),
-  examCategoryDist: (id) => request.get(`/stats/exam/${id}/category-distribution`),
+  insights: (id, config = {}) => request.get(`/stats/exam/${id}/insights`, config),
+  examCategoryDist: (id, config = {}) => request.get(`/stats/exam/${id}/category-distribution`, config),
 }
 
 export const notificationApi = {
