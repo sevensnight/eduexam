@@ -184,6 +184,7 @@ CREATE TABLE IF NOT EXISTS notifications (
     user_id    BIGINT       NOT NULL,
     content    TEXT         NOT NULL,
     type       VARCHAR(32)  NOT NULL DEFAULT 'info',
+    target_path VARCHAR(255) NULL,
     is_read    TINYINT(1)   NOT NULL DEFAULT 0,
     created_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_notif_user (user_id),

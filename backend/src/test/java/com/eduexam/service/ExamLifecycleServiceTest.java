@@ -75,6 +75,8 @@ class ExamLifecycleServiceTest {
         ArgumentCaptor<Notification> notification = ArgumentCaptor.forClass(Notification.class);
         verify(notificationMapper).insert(notification.capture());
         assertEquals(10L, notification.getValue().getUserId());
+        assertEquals("exam", notification.getValue().getType());
+        assertEquals("/exams/1/take", notification.getValue().getTargetPath());
     }
 
     @Test
@@ -125,7 +127,51 @@ class ExamLifecycleServiceTest {
         assertEquals("A", persisted.getValue().getUserAnswer());
         assertEquals("Y", persisted.getValue().getIsCorrect());
         assertEquals(5.0, persisted.getValue().getScoreGot());
-        verify(notificationMapper).insert(any(Notification.class));
+        ArgumentCaptor<Notification> notification = ArgumentCaptor.forClass(Notification.class);
+        verify(notificationMapper).insert(notification.capture());
+        assertEquals(10L, notification.getValue().getUserId());
+        assertEquals("/exams/1/result", notification.getValue().getTargetPath());
+    }
+
+    @Test
+    void automaticCollectionNotifiesTeacherAboutPendingEssayAndLinksToGrading() {
+        Exam exam = exam("published");
+        exam.setTeacherId(8L);
+        ExamRecord record = new ExamRecord();
+        record.setId(20L);
+        record.setExamId(1L);
+        record.setStudentId(10L);
+        record.setStatus("in_progress");
+        record.setStartedAt(LocalDateTime.now().minusMinutes(10));
+        Answer draft = new Answer();
+        draft.setRecordId(20L);
+        draft.setQuestionId(3L);
+        draft.setUserAnswer("学生作答");
+        Question essay = question();
+        essay.setQuestionType("essay");
+        essay.setOptions(null);
+        essay.setAnswer("参考答案");
+
+        when(examMapper.selectOne(any())).thenReturn(exam);
+        when(examRecordMapper.selectList(any())).thenReturn(List.of(record), List.of(record));
+        when(examQuestionMapper.selectList(any())).thenReturn(List.of(examQuestion()));
+        when(questionMapper.selectById(3L)).thenReturn(essay);
+        when(answerMapper.selectList(any())).thenReturn(List.of(draft));
+
+        assertTrue(service.closeExam(1L));
+
+        assertEquals("submitted", record.getStatus());
+        ArgumentCaptor<Notification> notifications = ArgumentCaptor.forClass(Notification.class);
+        verify(notificationMapper, times(2)).insert(notifications.capture());
+        Notification teacherNotice = notifications.getAllValues().stream()
+                .filter(item -> item.getUserId().equals(8L)).findFirst().orElseThrow();
+        Notification studentNotice = notifications.getAllValues().stream()
+                .filter(item -> item.getUserId().equals(10L)).findFirst().orElseThrow();
+        assertEquals("submission", teacherNotice.getType());
+        assertEquals("/exams/1/grade", teacherNotice.getTargetPath());
+        assertTrue(teacherNotice.getContent().contains("已自动收卷 1 份答卷"));
+        assertTrue(teacherNotice.getContent().contains("1 份含简答题等待批改"));
+        assertEquals("/exams/1/result", studentNotice.getTargetPath());
     }
 
     @Test

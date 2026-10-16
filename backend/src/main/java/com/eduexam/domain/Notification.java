@@ -13,6 +13,7 @@ public class Notification {
     private Long userId;
     private String content;
     private String type;
+    private String targetPath;
     private Boolean isRead;
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;

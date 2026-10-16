@@ -2,6 +2,7 @@ package com.eduexam.controller;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.eduexam.common.AppException;
 import com.eduexam.domain.Notification;
 import com.eduexam.mapper.NotificationMapper;
 import com.eduexam.security.LoginUser;
@@ -24,6 +25,7 @@ public class NotificationController {
         m.put("id", n.getId());
         m.put("content", n.getContent());
         m.put("type", n.getType());
+        m.put("target_path", n.getTargetPath());
         m.put("is_read", n.getIsRead());
         m.put("created_at", n.getCreatedAt());
         return m;
@@ -44,6 +46,20 @@ public class NotificationController {
                 .orderByDesc(Notification::getCreatedAt)
                 .last("LIMIT 30"))
                 .stream().map(this::notifToMap).collect(Collectors.toList());
+    }
+
+    @PutMapping("/{notificationId}/read")
+    public Map<String, Object> readOne(@PathVariable Long notificationId,
+                                       @AuthenticationPrincipal LoginUser loginUser) {
+        Notification notification = notificationMapper.selectOne(new LambdaQueryWrapper<Notification>()
+                .eq(Notification::getId, notificationId)
+                .eq(Notification::getUserId, loginUser.getUserId()));
+        if (notification == null) throw AppException.notFound("通知不存在");
+        if (!Boolean.TRUE.equals(notification.getIsRead())) {
+            notification.setIsRead(true);
+            notificationMapper.updateById(notification);
+        }
+        return notifToMap(notification);
     }
 
     @PutMapping("/read-all")

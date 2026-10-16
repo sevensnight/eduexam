@@ -61,7 +61,8 @@ public class ExamLifecycleService {
             throw AppException.badRequest("及格分不能高于考试总分");
         exam.setStatus("published");
         examMapper.updateById(exam);
-        notifyEligibleStudents(exam, "考试《" + exam.getTitle() + "》已发布，快去参加吧！", "exam");
+        notifyEligibleStudents(exam, "考试《" + exam.getTitle() + "》已发布，快去参加吧！",
+                "exam", "/exams/" + exam.getId() + "/take");
     }
 
     @Transactional
@@ -89,10 +90,23 @@ public class ExamLifecycleService {
         LocalDateTime submittedAt = LocalDateTime.now(APP_ZONE);
         for (ExamRecord record : unfinished) finalizeRecord(exam, record, submittedAt);
 
+        if (!unfinished.isEmpty() && exam.getTeacherId() != null) {
+            long pendingReview = unfinished.stream()
+                    .filter(record -> "submitted".equals(record.getStatus()))
+                    .count();
+            String reviewSummary = pendingReview > 0
+                    ? "，其中 " + pendingReview + " 份含简答题等待批改。"
+                    : "，系统已完成客观题评分。";
+            sendNotification(exam.getTeacherId(),
+                    "考试《" + exam.getTitle() + "》已自动收卷 " + unfinished.size() + " 份答卷" + reviewSummary,
+                    "submission", "/exams/" + exam.getId() + "/grade");
+        }
+
         if (statusChanged) {
             exam.setStatus("closed");
             examMapper.updateById(exam);
-            notifyParticipants(exam.getId(), "考试《" + exam.getTitle() + "》已关闭。", "exam");
+            notifyParticipants(exam.getId(), "考试《" + exam.getTitle() + "》已关闭。",
+                    "exam", "/exams/" + exam.getId() + "/result");
         }
     }
 
@@ -210,7 +224,7 @@ public class ExamLifecycleService {
         }
     }
 
-    private void notifyEligibleStudents(Exam exam, String content, String type) {
+    private void notifyEligibleStudents(Exam exam, String content, String type, String targetPath) {
         LambdaQueryWrapper<User> usersQuery = new LambdaQueryWrapper<User>()
                 .eq(User::getRole, "student").eq(User::getIsActive, true);
         if (exam.getTargetClass() != null && !exam.getTargetClass().isBlank())
@@ -224,21 +238,22 @@ public class ExamLifecycleService {
         }
         for (User student : candidates) {
             if (exam.getCourseId() == null || enrolled.contains(student.getId()))
-                sendNotification(student.getId(), content, type);
+                sendNotification(student.getId(), content, type, targetPath);
         }
     }
 
-    private void notifyParticipants(Long examId, String content, String type) {
+    private void notifyParticipants(Long examId, String content, String type, String targetPath) {
         examRecordMapper.selectList(new LambdaQueryWrapper<ExamRecord>().eq(ExamRecord::getExamId, examId))
                 .stream().map(ExamRecord::getStudentId).filter(Objects::nonNull).distinct()
-                .forEach(studentId -> sendNotification(studentId, content, type));
+                .forEach(studentId -> sendNotification(studentId, content, type, targetPath));
     }
 
-    private void sendNotification(Long userId, String content, String type) {
+    private void sendNotification(Long userId, String content, String type, String targetPath) {
         Notification notification = new Notification();
         notification.setUserId(userId);
         notification.setContent(content);
         notification.setType(type);
+        notification.setTargetPath(targetPath);
         notification.setIsRead(false);
         notificationMapper.insert(notification);
     }

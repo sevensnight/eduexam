@@ -71,6 +71,7 @@ export const statsApi = {
 export const notificationApi = {
   unreadCount: () => request.get('/notifications/unread-count'),
   list: () => request.get('/notifications'),
+  read: (id) => request.put(`/notifications/${id}/read`),
   readAll: () => request.put('/notifications/read-all'),
 }
 

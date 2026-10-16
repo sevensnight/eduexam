@@ -371,9 +371,9 @@ public class ExamController {
             throw AppException.badRequest("已有答卷后只能关闭考试");
     }
 
-    private void sendNotification(Long userId, String content, String type) {
+    private void sendNotification(Long userId, String content, String type, String targetPath) {
         Notification n = new Notification();
-        n.setUserId(userId); n.setContent(content); n.setType(type); n.setIsRead(false);
+        n.setUserId(userId); n.setContent(content); n.setType(type); n.setTargetPath(targetPath); n.setIsRead(false);
         notificationMapper.insert(n);
     }
 
@@ -393,7 +393,7 @@ public class ExamController {
                 : "，系统已完成客观题评分。";
         sendNotification(exam.getTeacherId(),
                 "学生“" + studentName + "”已提交考试《" + exam.getTitle() + "》" + attempt + result,
-                "submission");
+                "submission", "/exams/" + exam.getId() + "/grade");
     }
 
     // ======================== Teacher/Admin CRUD ========================
@@ -938,7 +938,8 @@ public class ExamController {
         boolean releaseScore = canStudentSeeResult(exam, record);
         if ("graded".equals(record.getStatus()) && canStudentSeeResult(exam, record)) {
             sendNotification(loginUser.getUserId(),
-                    "您的考试《" + exam.getTitle() + "》已完成评分，得分：" + totalScore, "grade");
+                    "您的考试《" + exam.getTitle() + "》已完成评分，得分：" + totalScore,
+                    "grade", "/exams/" + exam.getId() + "/result");
         }
 
         Map<String, Object> response = new LinkedHashMap<>();
@@ -1220,7 +1221,8 @@ public class ExamController {
         String gradeMessage = canStudentSeeResult(exam, record)
                 ? "您的考试《" + exam.getTitle() + "》已批改完成，得分：" + totalScoreCalc
                 : "您的考试《" + exam.getTitle() + "》已完成批改，成绩将在考试结束后公布";
-        sendNotification(record.getStudentId(), gradeMessage, "grade");
+        sendNotification(record.getStudentId(), gradeMessage, "grade",
+                "/exams/" + exam.getId() + "/result");
         return Map.of("ok", true, "total_score", totalScoreCalc, "essay_graded", true);
     }
 
@@ -1423,7 +1425,8 @@ public class ExamController {
             String message = canStudentSeeResult(exam, record)
                     ? "您的考试《" + exam.getTitle() + "》成绩已更新：" + plan.totalScore()
                     : "您的考试《" + exam.getTitle() + "》成绩已更新，成绩将在考试结束后公布";
-            sendNotification(record.getStudentId(), message, "grade");
+            sendNotification(record.getStudentId(), message, "grade",
+                    "/exams/" + exam.getId() + "/result");
         }
         return Map.of("processed", rows.size(), "created", 0, "updated", plans.size(), "errors", List.of());
     }

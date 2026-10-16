@@ -19,19 +19,36 @@
           <span>{{ pageInfo.title }}</span>
         </div>
         <div class="header-tools">
-          <el-popover placement="bottom-end" :width="300" trigger="click" @show="openNotifications">
+          <el-popover v-model:visible="notificationOpen" placement="bottom-end" :width="360" trigger="click" @show="openNotifications">
             <template #reference>
               <el-badge :value="unreadCount" :hidden="!unreadCount" :max="99" type="danger">
                 <button type="button" class="icon-button" :aria-label="'通知，' + unreadCount + ' 条未读'"><el-icon :size="20"><Bell /></el-icon></button>
               </el-badge>
             </template>
-            <div class="notification-title">通知</div>
+            <div class="notification-title">
+              <div><strong>通知</strong><span>{{ unreadCount ? `${unreadCount} 条未读` : '全部已读' }}</span></div>
+              <button v-if="unreadCount" type="button" @click="markAllNotificationsRead">全部已读</button>
+            </div>
             <div class="notification-list" v-loading="notifLoading">
               <el-empty v-if="!notifications.length && !notifLoading" description="暂无通知" :image-size="60" />
-              <article v-for="n in notifications" :key="n.id" class="notification-item">
-                <p>{{ n.content }}</p>
-                <time>{{ formatAppDateTime(n.created_at) }}</time>
-              </article>
+              <button
+                v-for="n in notifications"
+                :key="n.id"
+                type="button"
+                class="notification-item"
+                :class="{ 'is-unread': !n.is_read, 'is-actionable': safeNotificationTarget(n.target_path) }"
+                :aria-label="n.content + (safeNotificationTarget(n.target_path) ? '，点击查看' : '')"
+                @click="handleNotification(n)"
+              >
+                <span v-if="!n.is_read" class="notification-dot" aria-label="未读"></span>
+                <span class="notification-copy">
+                  <span class="notification-content">{{ n.content }}</span>
+                  <span class="notification-meta">
+                    <time>{{ formatAppDateTime(n.created_at) }}</time>
+                    <span v-if="safeNotificationTarget(n.target_path)" class="notification-action">查看<el-icon><ArrowRight /></el-icon></span>
+                  </span>
+                </span>
+              </button>
             </div>
           </el-popover>
           <span class="tools-divider" aria-hidden="true"></span>
@@ -75,7 +92,8 @@ import { notificationApi } from '@/api'
 import AppNavigation from '@/components/AppNavigation.vue'
 import { getPageInfo } from '@/utils/pageInfo'
 import { formatAppDateTime } from '@/utils/examTime'
-import { ArrowDown, Bell, Menu, Reading, Setting } from '@element-plus/icons-vue'
+import { getNotificationTarget } from '@/utils/notification'
+import { ArrowDown, ArrowRight, Bell, Menu, Reading, Setting } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -84,6 +102,7 @@ const menuOpen = ref(false)
 const pageInfo = computed(() => getPageInfo(route.path))
 const roleLabel = computed(() => ({ admin: '管理员', teacher: '教师', student: '学生' }[store.user?.role] || ''))
 watch(() => route.path, () => { menuOpen.value = false; document.title = pageInfo.value.title + ' · EduExam' }, { immediate: true })
+const notificationOpen = ref(false)
 const unreadCount = ref(0)
 const notifications = ref([])
 const notifLoading = ref(false)
@@ -100,8 +119,28 @@ async function openNotifications() {
   notifLoading.value = true
   try {
     notifications.value = await notificationApi.list()
-    if (unreadCount.value > 0) { await notificationApi.readAll(); unreadCount.value = 0 }
+    await fetchUnread()
   } finally { notifLoading.value = false }
+}
+function safeNotificationTarget(target) {
+  return getNotificationTarget(target)
+}
+async function handleNotification(notification) {
+  if (!notification.is_read) {
+    const updated = await notificationApi.read(notification.id)
+    Object.assign(notification, updated)
+    unreadCount.value = Math.max(0, unreadCount.value - 1)
+  }
+  const target = safeNotificationTarget(notification.target_path)
+  if (target) {
+    notificationOpen.value = false
+    await router.push(target)
+  }
+}
+async function markAllNotificationsRead() {
+  await notificationApi.readAll()
+  notifications.value.forEach(notification => { notification.is_read = true })
+  unreadCount.value = 0
 }
 function handleCommand(cmd) {
   if (cmd === 'logout') { store.logout(); router.push('/login') }
@@ -145,11 +184,24 @@ onUnmounted(() => {
 .user-info > .el-icon { margin-left: 8px; font-size: 12px; color: var(--app-text-secondary); }
 .el-main { padding: 36px 40px 0; overflow: visible; min-width: 0; }
 .workspace-footer { max-width: 1480px; margin: 32px auto 0; padding: 22px 0; display: flex; justify-content: space-between; border-top: 1px solid var(--app-border); color: var(--app-text-secondary); font-size: 11px; }
-.notification-title { padding: 8px 8px 14px; font-size: 15px; font-weight: 600; border-bottom: 1px solid var(--app-border); }
-.notification-list { max-height: 340px; min-height: 100px; overflow-y: auto; }
-.notification-item { padding: 14px 8px; border-bottom: 1px solid var(--app-border); }
-.notification-item p { font-size: 13px; margin: 0 0 6px; }
-.notification-item time { color: var(--app-text-secondary); font-size: 11px; }
+.notification-title { padding: 8px 8px 13px; border-bottom: 1px solid var(--app-border); display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.notification-title > div { display: grid; gap: 2px; }
+.notification-title strong { font-size: 15px; font-weight: 600; }
+.notification-title span { color: var(--app-text-secondary); font-size: 11px; font-weight: 400; }
+.notification-title button { border: 0; background: transparent; color: var(--app-accent); font-size: 12px; padding: 6px; border-radius: 6px; }
+.notification-title button:hover { background: var(--app-accent-soft); }
+.notification-list { max-height: 390px; min-height: 100px; overflow-y: auto; }
+.notification-item { width: 100%; padding: 14px 8px; border: 0; border-bottom: 1px solid var(--app-border); background: transparent; color: var(--app-text); display: flex; align-items: flex-start; gap: 9px; text-align: left; font: inherit; cursor: pointer; }
+.notification-item:hover { background: var(--app-bg); }
+.notification-item:focus-visible { outline: 2px solid var(--app-accent); outline-offset: -2px; }
+.notification-item.is-unread { background: #f5f9ff; }
+.notification-item.is-unread:hover { background: #edf5ff; }
+.notification-dot { width: 7px; height: 7px; margin-top: 6px; border-radius: 50%; background: var(--app-accent); flex: 0 0 auto; }
+.notification-copy { min-width: 0; flex: 1; display: grid; gap: 8px; }
+.notification-content { font-size: 13px; line-height: 1.55; }
+.notification-meta { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--app-text-secondary); font-size: 11px; }
+.notification-action { display: inline-flex; align-items: center; gap: 2px; color: var(--app-accent); font-weight: 500; }
+.notification-action .el-icon { font-size: 12px; }
 .mobile-menu { display: none; }
 .skip-link { position: fixed; top: -100px; left: 16px; background: white; padding: 12px; z-index: 3000; }
 .skip-link:focus { top: 12px; }

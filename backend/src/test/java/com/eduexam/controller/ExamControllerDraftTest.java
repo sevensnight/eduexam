@@ -161,6 +161,7 @@ class ExamControllerDraftTest {
         verify(notificationMapper, times(1)).insert(notification.capture());
         assertEquals(8L, notification.getValue().getUserId());
         assertEquals("submission", notification.getValue().getType());
+        assertEquals("/exams/1/grade", notification.getValue().getTargetPath());
         assertFalse(notification.getValue().getIsRead());
         assertTrue(notification.getValue().getContent().contains("学生“student”已提交考试《测试考试》"));
         assertTrue(notification.getValue().getContent().contains("系统已完成客观题评分"));
@@ -188,6 +189,7 @@ class ExamControllerDraftTest {
         ArgumentCaptor<Notification> notification = ArgumentCaptor.forClass(Notification.class);
         verify(notificationMapper).insert(notification.capture());
         assertEquals(8L, notification.getValue().getUserId());
+        assertEquals("/exams/1/grade", notification.getValue().getTargetPath());
         assertTrue(notification.getValue().getContent().contains("学生“张三”已提交考试《测试考试》"));
         assertTrue(notification.getValue().getContent().contains("含简答题，请及时批改"));
     }
