@@ -30,3 +30,7 @@ eduexam_backup*.sql
 .env.*
 !.env.example
 .eduexam.local.bat
+
+# Production deployment secrets and assembled artifacts
+deploy/.env
+deploy/runtime/

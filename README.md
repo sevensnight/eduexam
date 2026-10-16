@@ -46,6 +46,10 @@ $env:EDUEXAM_SEED_DEMO = 'true' # 仅本地空库演示时需要
 
 如果后端不在本机的 8080 端口运行，可以复制 `frontend/.env.example` 为 `frontend/.env.local`，再修改 `VITE_API_PROXY_TARGET`。`.env.local` 被 Git 忽略，不会进入提交。
 
+## Docker 服务器部署
+
+Linux 服务器的 Docker Compose 目录结构、启动、更新、备份和停止方法见 [deploy/README.md](deploy/README.md)。部署密钥、数据库密码、JWT 密钥和组装后的前后端产物均不会提交到 Git。
+
 ## 演示账号
 
 | 角色 | 用户名 | 密码 |
