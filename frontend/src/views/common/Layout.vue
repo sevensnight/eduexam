@@ -147,6 +147,9 @@ function handleCommand(cmd) {
   else if (cmd === 'profile') router.push('/profile')
 }
 onMounted(() => {
+  // The token outlives the cached profile. Refresh it so server-side profile
+  // corrections (for example an encoding repair) appear without a new login.
+  store.refreshCurrentUser().catch(() => {})
   fetchUnread()
   pollTimer = setInterval(fetchUnread, NOTIFICATION_POLL_INTERVAL_MS)
   window.addEventListener('focus', fetchUnread)

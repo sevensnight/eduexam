@@ -20,6 +20,16 @@ export const useUserStore = defineStore('user', {
       this.user = user
       setStoredAuth(token, user)
     },
+    async refreshCurrentUser() {
+      const token = this.token || getStoredToken()
+      if (!token) return null
+
+      const user = await authApi.me({ suppressError: true })
+      this.token = token
+      this.user = user
+      setStoredAuth(token, user)
+      return user
+    },
     logout() {
       this.token = ''
       this.user = null

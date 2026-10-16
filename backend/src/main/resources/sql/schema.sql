@@ -1,6 +1,8 @@
 -- MySQL schema for eduexam
 -- Run this once to initialize the database: mysql -u root -p < schema.sql
 
+SET NAMES utf8mb4;
+
 CREATE DATABASE IF NOT EXISTS eduexam DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 USE eduexam;
 

@@ -3,7 +3,7 @@ import request from './request'
 export const authApi = {
   register: (data) => request.post('/auth/register', data),
   login: (data) => request.post('/auth/login', data),
-  me: () => request.get('/auth/me'),
+  me: (config = {}) => request.get('/auth/me', config),
   updateProfile: (data) => request.put('/auth/profile', data),
   changePassword: (data) => request.put('/auth/password', data),
 }
