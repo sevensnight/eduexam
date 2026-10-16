@@ -88,9 +88,13 @@ const unreadCount = ref(0)
 const notifications = ref([])
 const notifLoading = ref(false)
 let pollTimer = null
+const NOTIFICATION_POLL_INTERVAL_MS = 10000
 async function fetchUnread() {
   const res = await notificationApi.unreadCount().catch(() => ({ count: 0 }))
   unreadCount.value = res.count || 0
+}
+function refreshNotificationsWhenVisible() {
+  if (document.visibilityState === 'visible') fetchUnread()
 }
 async function openNotifications() {
   notifLoading.value = true
@@ -103,8 +107,17 @@ function handleCommand(cmd) {
   if (cmd === 'logout') { store.logout(); router.push('/login') }
   else if (cmd === 'profile') router.push('/profile')
 }
-onMounted(() => { fetchUnread(); pollTimer = setInterval(fetchUnread, 30000) })
-onUnmounted(() => clearInterval(pollTimer))
+onMounted(() => {
+  fetchUnread()
+  pollTimer = setInterval(fetchUnread, NOTIFICATION_POLL_INTERVAL_MS)
+  window.addEventListener('focus', fetchUnread)
+  document.addEventListener('visibilitychange', refreshNotificationsWhenVisible)
+})
+onUnmounted(() => {
+  clearInterval(pollTimer)
+  window.removeEventListener('focus', fetchUnread)
+  document.removeEventListener('visibilitychange', refreshNotificationsWhenVisible)
+})
 </script>
 
 <style scoped>

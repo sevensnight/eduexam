@@ -377,6 +377,25 @@ public class ExamController {
         notificationMapper.insert(n);
     }
 
+    private void notifyExamOwnerOfSubmission(Exam exam, ExamRecord record,
+                                               User student, boolean hasEssay) {
+        if (exam.getTeacherId() == null || student == null
+                || Objects.equals(exam.getTeacherId(), student.getId())) return;
+
+        String studentName = student.getRealName() != null && !student.getRealName().isBlank()
+                ? student.getRealName().strip()
+                : student.getUsername();
+        String attempt = record.getAttemptCount() != null
+                ? "（第 " + record.getAttemptCount() + " 次作答）"
+                : "";
+        String result = hasEssay
+                ? "，答卷中含简答题，请及时批改。"
+                : "，系统已完成客观题评分。";
+        sendNotification(exam.getTeacherId(),
+                "学生“" + studentName + "”已提交考试《" + exam.getTitle() + "》" + attempt + result,
+                "submission");
+    }
+
     // ======================== Teacher/Admin CRUD ========================
 
     @GetMapping
@@ -913,6 +932,8 @@ public class ExamController {
         record.setEssayGraded(!hasEssay);
         record.setVersion(currentDraftVersion + 1);
         examRecordMapper.updateById(record);
+
+        notifyExamOwnerOfSubmission(exam, record, currentStudent, hasEssay);
 
         boolean releaseScore = canStudentSeeResult(exam, record);
         if ("graded".equals(record.getStatus()) && canStudentSeeResult(exam, record)) {

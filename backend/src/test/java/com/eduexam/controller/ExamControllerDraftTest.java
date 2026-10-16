@@ -4,6 +4,7 @@ import com.eduexam.domain.Answer;
 import com.eduexam.domain.Exam;
 import com.eduexam.domain.ExamQuestion;
 import com.eduexam.domain.ExamRecord;
+import com.eduexam.domain.Notification;
 import com.eduexam.domain.Question;
 import com.eduexam.domain.User;
 import com.eduexam.common.AppException;
@@ -138,6 +139,57 @@ class ExamControllerDraftTest {
         verify(answerMapper, never()).delete(any());
         verify(answerMapper, never()).insert(any(Answer.class));
         assertEquals("in_progress", record.getStatus());
+    }
+
+    @Test
+    void objectiveSubmissionNotifiesExamOwnerOnlyOnce() {
+        Exam exam = exam("published", true);
+        exam.setTeacherId(8L);
+        ExamRecord record = inProgressRecord();
+        when(examMapper.selectOne(any())).thenReturn(exam);
+        when(userMapper.selectOne(any())).thenReturn(loginUser().getUser());
+        when(examRecordMapper.selectOne(any())).thenReturn(record);
+        when(examQuestionMapper.selectList(any())).thenReturn(List.of(examQuestion()));
+        when(questionMapper.selectById(4L)).thenReturn(singleChoiceQuestion());
+
+        Map<String, Object> first = controller.submitExam(1L, submission("A"), loginUser());
+        Map<String, Object> replay = controller.submitExam(1L, submission("A"), loginUser());
+
+        assertEquals("graded", first.get("status"));
+        assertEquals(true, replay.get("already_submitted"));
+        ArgumentCaptor<Notification> notification = ArgumentCaptor.forClass(Notification.class);
+        verify(notificationMapper, times(1)).insert(notification.capture());
+        assertEquals(8L, notification.getValue().getUserId());
+        assertEquals("submission", notification.getValue().getType());
+        assertFalse(notification.getValue().getIsRead());
+        assertTrue(notification.getValue().getContent().contains("学生“student”已提交考试《测试考试》"));
+        assertTrue(notification.getValue().getContent().contains("系统已完成客观题评分"));
+    }
+
+    @Test
+    void essaySubmissionTellsExamOwnerThatReviewIsRequired() {
+        Exam exam = exam("published", true);
+        exam.setTeacherId(8L);
+        ExamRecord record = inProgressRecord();
+        User student = loginUser().getUser();
+        student.setRealName("张三");
+        Question essay = singleChoiceQuestion();
+        essay.setQuestionType("essay");
+        essay.setAnswer("参考答案");
+        when(examMapper.selectOne(any())).thenReturn(exam);
+        when(userMapper.selectOne(any())).thenReturn(student);
+        when(examRecordMapper.selectOne(any())).thenReturn(record);
+        when(examQuestionMapper.selectList(any())).thenReturn(List.of(examQuestion()));
+        when(questionMapper.selectById(4L)).thenReturn(essay);
+
+        Map<String, Object> result = controller.submitExam(1L, submission("学生作答"), loginUser());
+
+        assertEquals("submitted", result.get("status"));
+        ArgumentCaptor<Notification> notification = ArgumentCaptor.forClass(Notification.class);
+        verify(notificationMapper).insert(notification.capture());
+        assertEquals(8L, notification.getValue().getUserId());
+        assertTrue(notification.getValue().getContent().contains("学生“张三”已提交考试《测试考试》"));
+        assertTrue(notification.getValue().getContent().contains("含简答题，请及时批改"));
     }
 
     @Test
