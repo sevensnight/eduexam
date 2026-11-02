@@ -22,7 +22,7 @@
         <java.version>17</java.version>
         <!-- Keep the Boot 3.5 line while taking the latest compatible Tomcat security fixes. -->
         <tomcat.version>10.1.60</tomcat.version>
-        <mybatis-plus.version>3.5.17</mybatis-plus.version>
+        <mybatis-plus.version>3.5.18.1</mybatis-plus.version>
         <jjwt.version>0.13.0</jjwt.version>
     </properties>
 
